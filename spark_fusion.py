@@ -63,4 +63,4 @@ final_df.write.mode("overwrite").parquet(
 
 print("Spark fusion complete - merged unstructured and structured data")
 
-final_df.show(truncate=100)
+# final_df.show(truncate=100)
