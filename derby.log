@@ -1,0 +1,13 @@
+----------------------------------------------------------------
+Wed Jan 07 16:20:03 IST 2026:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.16.1.1 - (1901046): instance a816c00e-019b-9813-f5b9-000000f080a0 
+on database directory /home/dell/IS/metastore_db with class loader jdk.internal.loader.ClassLoaders$AppClassLoader@76ed5528 
+Loaded from file:/home/dell/IS/venv/lib/python3.12/site-packages/pyspark/jars/derby-10.16.1.1.jar
+java.vendor=Ubuntu
+java.runtime.version=21.0.9+10-Ubuntu-124.04
+user.dir=/home/dell/IS
+os.name=Linux
+os.arch=amd64
+os.version=6.14.0-37-generic
+derby.system.home=null
+Database Class Loader started - derby.database.classpath=''

@@ -1,0 +1,4 @@
+customer_id,name,gender,age,document_name
+1, Alice,F,32,diabetes_1.pdf
+2, Bob,M,45,diabetes_2.pdf
+3,Sam,M,47,diabetes_3.pdf
