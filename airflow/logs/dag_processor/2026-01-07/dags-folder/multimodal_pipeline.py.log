@@ -1,0 +1,3 @@
+{"timestamp":"2026-01-07T16:53:53.877969Z","level":"info","event":"Filling up the DagBag from /home/dell/BigQueryIS/airflow/dags/multimodal_pipeline.py","logger":"airflow.models.dagbag.DagBag","filename":"dagbag.py","lineno":593}
+{"timestamp":"2026-01-07T16:54:24.542698Z","level":"info","event":"Filling up the DagBag from /home/dell/BigQueryIS/airflow/dags/multimodal_pipeline.py","logger":"airflow.models.dagbag.DagBag","filename":"dagbag.py","lineno":593}
+{"timestamp":"2026-01-07T16:54:54.733312Z","level":"info","event":"Filling up the DagBag from /home/dell/BigQueryIS/airflow/dags/multimodal_pipeline.py","logger":"airflow.models.dagbag.DagBag","filename":"dagbag.py","lineno":593}
