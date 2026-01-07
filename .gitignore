@@ -3,3 +3,16 @@ __pycache__/*
 venv/*
 metastore_db/*
 spark_warehouse/*
+
+airflow/airflow.cfg
+airflow/airflow.db
+airflow/logs/
+airflow/plugins/__pycache__/
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+venv/
+.env
