@@ -1,0 +1,5 @@
+*log*
+__pycache__/*
+venv/*
+metastore_db/*
+spark_warehouse/*
