@@ -55,11 +55,15 @@ fused_df = structured_df.join(
 
 final_df = fused_df
 
-
-
-final_df.write.mode("overwrite").parquet(
-    OUTPUT_DIR
+OUTPUT_DIR = os.path.join(
+    BASE_DIR,
+    "data",
+    "output",
+    "fused_multimodal_generic",
+    "demo.parquet"   # directory name
 )
+
+final_df.write.mode("overwrite").parquet(OUTPUT_DIR)
 
 print("Spark fusion complete - merged unstructured and structured data")
 

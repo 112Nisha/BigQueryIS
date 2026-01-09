@@ -4,11 +4,24 @@ from singa import tensor, device, autograd
 
 dev = device.create_cpu_device()
 
-df = pd.read_parquet("data/output/fused_multimodal_generic/part-00000-1967448f-53ce-4fb3-9646-3b380f10ef84-c000.snappy.parquet")
+df = pd.read_parquet(
+    "data/output/fused_multimodal_generic/demo.parquet"
+)
 
-numeric = df[["age", "bmi"]].to_numpy().astype(np.float32)
+# pick age + bmi regardless of casing
+num_cols = [c for c in df.columns if c.lower() in ("age", "bmi")]
+
+# sanity check (optional but useful)
+print("Numeric columns:", num_cols)
+
+numeric = df[num_cols].astype(np.float32).to_numpy()
+
+text_col = next(c for c in df.columns if "text" in c.lower())
+
 text_len = (
-    df["text_note"].astype(str)
+    df[text_col]
+    .fillna("")
+    .astype(str)
     .str.len()
     .to_numpy()
     .reshape(-1, 1)
