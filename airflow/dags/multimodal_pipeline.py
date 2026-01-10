@@ -10,13 +10,13 @@ import os
 # export AIRFLOW_HOME=/home/dell/BigQueryIS/airflow 
 # then do airflow db reset and press y
 
-# run airflow db reset after you change multimodel_pipeline.py to see your changes in airflow
+# run `airflow db reset` after you change multimodel_pipeline.py to see your changes in airflow
 
 DAG_FILE = os.path.abspath(__file__)
 DAGS_DIR = os.path.dirname(DAG_FILE)
 AIRFLOW_DIR = os.path.dirname(DAGS_DIR)
 PROJECT_DIR = os.path.dirname(AIRFLOW_DIR)
-VENV_DIR = os.path.join(PROJECT_DIR, "venv")
+VENV_DIR = "cuda"
 
 with DAG(
     dag_id="multimodal_pipeline",
@@ -35,11 +35,24 @@ with DAG(
 
     spark = BashOperator(
         task_id="spark_fusion",
-        bash_command=f"""
-        source {VENV_DIR}/bin/activate
-        spark-submit {PROJECT_DIR}/spark_fusion.py
+        bash_command="""
+        set -ux
+        echo "PWD=$(pwd)"
+        echo "USER=$(whoami)"
+
+        echo "JAVA:"
+        java -version || echo "JAVA NOT FOUND"
+
+        echo "SPARK:"
+        which spark-submit || echo "spark-submit NOT FOUND"
+        ls -l /opt/spark/bin || echo "/opt/spark/bin NOT FOUND"
+
+        echo "PYTHON:"
+        source cuda/bin/activate
+        which python
+        python -V
         """
-    )
+)
 
      # singa = BashOperator(
     #     task_id="singa_inference",
