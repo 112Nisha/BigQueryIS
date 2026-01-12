@@ -1,5 +1,5 @@
 from airflow import DAG
-from airflow.providers.standard.operators.bash import BashOperator
+from airflow.operators.bash import BashOperator
 from datetime import datetime
 import os
 
@@ -18,6 +18,7 @@ AIRFLOW_DIR = os.path.dirname(DAGS_DIR)
 PROJECT_DIR = os.path.dirname(AIRFLOW_DIR)
 VENV_DIR = "cuda"
 
+
 with DAG(
     dag_id="multimodal_pipeline",
     start_date=datetime(2024, 1, 1),
@@ -35,24 +36,36 @@ with DAG(
 
     spark = BashOperator(
         task_id="spark_fusion",
-        bash_command="""
-        set -ux
-        echo "PWD=$(pwd)"
-        echo "USER=$(whoami)"
+        cwd=PROJECT_DIR,
+        bash_command=f"""
+        source /home/nishita/cuda/bin/activate
 
-        echo "JAVA:"
-        java -version || echo "JAVA NOT FOUND"
+        export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+        export SPARK_HOME=/home/nishita/cuda
+        export PYSPARK_PYTHON=/home/nishita/cuda/bin/python
+        export PYSPARK_DRIVER_PYTHON=/home/nishita/cuda/bin/python
 
-        echo "SPARK:"
-        which spark-submit || echo "spark-submit NOT FOUND"
-        ls -l /opt/spark/bin || echo "/opt/spark/bin NOT FOUND"
-
-        echo "PYTHON:"
-        source cuda/bin/activate
-        which python
-        python -V
+        /home/nishita/cuda/bin/spark-submit {PROJECT_DIR}/spark_fusion.py
         """
-)
+    )
+
+
+    # spark = BashOperator(
+    #     task_id="spark_fusion",
+    #     cwd=PROJECT_DIR,
+    #     bash_command=f"""
+    #     source {VENV_DIR}/bin/activate
+
+    #     export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+    #     export SPARK_HOME={VENV_DIR}
+    #     export PYSPARK_PYTHON={VENV_DIR}/bin/python
+    #     export PYSPARK_DRIVER_PYTHON={VENV_DIR}/bin/python
+
+    #     {VENV_DIR}/bin/spark-class \
+    #     org.apache.spark.deploy.SparkSubmit \
+    #     spark_fusion.py
+    #     """
+    # )
 
      # singa = BashOperator(
     #     task_id="singa_inference",
