@@ -16,7 +16,6 @@ DAG_FILE = os.path.abspath(__file__)
 DAGS_DIR = os.path.dirname(DAG_FILE)
 AIRFLOW_DIR = os.path.dirname(DAGS_DIR)
 PROJECT_DIR = os.path.dirname(AIRFLOW_DIR)
-VENV_DIR = "cuda"
 
 
 with DAG(
@@ -29,7 +28,8 @@ with DAG(
     tika = BashOperator(
         task_id="tika_extract",
         bash_command=f"""
-        source {VENV_DIR}/bin/activate
+        source ~/miniconda3/etc/profile.d/conda.sh
+        conda activate py310
         python {PROJECT_DIR}/tika_extract.py
         """
     )
@@ -38,14 +38,14 @@ with DAG(
         task_id="spark_fusion",
         cwd=PROJECT_DIR,
         bash_command=f"""
-        source /home/nishita/cuda/bin/activate
+        source ~/miniconda3/etc/profile.d/conda.sh
+        conda activate py310
 
         export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-        export SPARK_HOME=/home/nishita/cuda
-        export PYSPARK_PYTHON=/home/nishita/cuda/bin/python
-        export PYSPARK_DRIVER_PYTHON=/home/nishita/cuda/bin/python
+        export PYSPARK_PYTHON=$(which python)
+        export PYSPARK_DRIVER_PYTHON=$(which python)
 
-        /home/nishita/cuda/bin/spark-submit {PROJECT_DIR}/spark_fusion.py
+        spark-submit {PROJECT_DIR}/spark_fusion.py
         """
     )
 
