@@ -5,7 +5,6 @@ spark_warehouse/*
 
 airflow/airflow.cfg
 airflow/airflow.db
-airflow/logs/
 airflow/plugins/__pycache__/
 
 __pycache__/

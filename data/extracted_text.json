@@ -51,7 +51,7 @@
         "org.apache.tika.parser.DefaultParser",
         "org.apache.tika.parser.pdf.PDFParser"
       ],
-      "X-TIKA:parse_time_millis": "840",
+      "X-TIKA:parse_time_millis": "35",
       "X-TIKA:embedded_depth": "0",
       "access_permission:can_modify": "true",
       "pdf:docinfo:producer": "macOS Version 14.6.1 (Build 23G93) Quartz PDFContext",
@@ -126,7 +126,7 @@
       "access_permission:extract_content": "true",
       "access_permission:can_print": "true",
       "pdf:docinfo:trapped": "False",
-      "X-TIKA:parse_time_millis": "412",
+      "X-TIKA:parse_time_millis": "52",
       "xmpMM:DerivedFrom:InstanceID": "b93dd42b-3e6c-11de-9a3c-d978ccb6ff4e",
       "access_permission:can_modify": "true",
       "pdf:docinfo:created": "2009-06-19T13:05:17Z"
@@ -200,7 +200,7 @@
       "access_permission:extract_content": "true",
       "access_permission:can_print": "true",
       "pdf:docinfo:trapped": "False",
-      "X-TIKA:parse_time_millis": "220",
+      "X-TIKA:parse_time_millis": "84",
       "xmpMM:DerivedFrom:InstanceID": "xmp.iid:a704c751-c0ba-e240-a264-f26dd976b9fb",
       "access_permission:can_modify": "true",
       "pdf:docinfo:created": "2024-01-04T07:15:14Z"

@@ -10,10 +10,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STRUCTURED_CSV = os.path.join(BASE_DIR, "data", "structured", "diabetes.csv")
 EXTRACTED_JSON = os.path.join(BASE_DIR, "data", "extracted_text.json")
 OUTPUT_DIR = os.path.join(BASE_DIR, "data", "output", "fused_multimodal_generic")
-import shutil
-
-if os.path.exists(OUTPUT_DIR):
-    shutil.rmtree(OUTPUT_DIR)
 
 spark = SparkSession.builder \
     .appName("Generic-Multimodal-Fusion") \
@@ -32,7 +28,6 @@ structured_df = structured_df.toDF(
 unstructured_df = spark.read.option("multiLine", True).json(
     EXTRACTED_JSON
 )
-
 
 
 if "text" in unstructured_df.columns:
@@ -60,17 +55,11 @@ fused_df = structured_df.join(
 
 final_df = fused_df
 
-OUTPUT_DIR = os.path.join(
-    BASE_DIR,
-    "data",
-    "output",
-    "fused_multimodal_generic",
-    "demo"
+
+
+final_df.write.mode("overwrite").parquet(
+    OUTPUT_DIR
 )
-
-os.makedirs(os.path.dirname(OUTPUT_DIR), exist_ok=True)
-
-final_df.write.mode("overwrite").parquet(OUTPUT_DIR)
 
 print("Spark fusion complete - merged unstructured and structured data")
 

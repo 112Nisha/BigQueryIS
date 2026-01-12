@@ -1,6 +1,9 @@
 from tika import parser
 import os
 import json
+import tika
+
+tika.initVM()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
