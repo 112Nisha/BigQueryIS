@@ -27,7 +27,7 @@ $(k,\ell)$-pebble game with colors. Our work also exposes connections between
 pebble game algorithms and previous sparse graph algorithms by Gabow, Gabow and
 Westermann and Hendrickson.
 ",,
-MISSING_PDF,"The evolution of the Earth-Moon system based on the dark matter field
+0704.0003,"The evolution of the Earth-Moon system based on the dark matter field
   fluid model",Hongjun Pan,physics.gen-ph,"  The evolution of Earth-Moon system is described by the dark matter field
 fluid model proposed in the Meeting of Division of Particle and Field 2004,
 American Physical Society. The current behavior of the Earth-Moon system agrees
@@ -354,7 +354,7 @@ function, we show that such a regime should be observable through the low
 frequency form of the optical conductivity. (3) The resistivity has a double
 kondo peak arrangement
 ",J. Low. Temp. Phys. Vol. 140 pp77-89 (2005),10.1007/s10909-005-6013-6
-MISSING_PDF,"Crystal channeling of LHC forward protons with preserved distribution in
+0704.0031,"Crystal channeling of LHC forward protons with preserved distribution in
   phase space","V. M. Biryukov (Serpukhov, IHEP)",hep-ph,"  We show that crystal can trap a broad (x, x', y, y', E) distribution of
 particles and channel it preserved with a high precision. This sampled-and-hold
 distribution can be steered by a bent crystal for analysis downstream. In
@@ -395,10 +395,10 @@ simulations were carried out for a wide range of d. Finally we discuss a number
 of new developments in DDA and their consequences for convergence.
 ","J.Opt.Soc.Am.A 23, 2578-2591 (2006); Erratum: J.Opt.Soc.Am.A 32,
   2407-2408 (2015)",10.1364/JOSAA.23.002578 10.1364/JOSAA.32.002407
-MISSING_PDF,Origin of adaptive mutants: a quantum measurement?,Vasily Ogryzko,q-bio.PE q-bio.CB quant-ph,"  This is a supplement to the paper arXiv:q-bio/0701050, containing the text of
+0704.0034,Origin of adaptive mutants: a quantum measurement?,Vasily Ogryzko,q-bio.PE q-bio.CB quant-ph,"  This is a supplement to the paper arXiv:q-bio/0701050, containing the text of
 correspondence sent to Nature in 1990.
 ",,
-MISSING_PDF,"Convergence of the discrete dipole approximation. II. An extrapolation
+0704.0035,"Convergence of the discrete dipole approximation. II. An extrapolation
   technique to increase the accuracy","Maxim A. Yurkin, Valeri P. Maltsev, Alfons G. Hoekstra",physics.optics physics.comp-ph,"  We propose an extrapolation technique that allows accuracy improvement of the
 discrete dipole approximation computations. The performance of this technique
 was studied empirically based on extensive simulations for 5 test cases using
@@ -424,7 +424,7 @@ there are at most n+1 steady states; and (4) for parameters far from the
 standard Michaelis-Menten quasi-steady state conditions, there is at most one
 steady state.
 ",,
-MISSING_PDF,"The discrete dipole approximation for simulation of light scattering by
+0704.0037,"The discrete dipole approximation for simulation of light scattering by
   particles much larger than the wavelength","Maxim A. Yurkin, Valeri P. Maltsev, Alfons G. Hoekstra",physics.optics physics.comp-ph,"  In this manuscript we investigate the capabilities of the Discrete Dipole
 Approximation (DDA) to simulate scattering from particles that are much larger
 than the wavelength of the incident light, and describe an optimized publicly
@@ -492,7 +492,7 @@ of commutative and noncommutative tori, and in this context, obtain the quantum
 double torus defined in \cite{hajac} as the universal quantum group of
 holomorphic isometries of the noncommutative torus.
 ",,10.1007/s00220-008-0461-1
-MISSING_PDF,"General System theory, Like-Quantum Semantics and Fuzzy Sets",Ignazio Licata,physics.gen-ph quant-ph,"  It is outlined the possibility to extend the quantum formalism in relation to
+0704.0042,"General System theory, Like-Quantum Semantics and Fuzzy Sets",Ignazio Licata,physics.gen-ph quant-ph,"  It is outlined the possibility to extend the quantum formalism in relation to
 the requirements of the general systems theory. It can be done by using a
 quantum semantics arising from the deep logical structure of quantum theory. It
 is so possible taking into account the logical openness relationship between
@@ -783,7 +783,7 @@ simulated and real DNA sequences.
 ","Algorithms in Bioinformatics: 7th International Workshop (WABI),
   4645 volume of Lecture Notes in Computer Science, pp. 240-251, Philadelphia,
   PA, USA, September 2007. Springer",10.1007/978-3-540-74126-8_23
-MISSING_PDF,Experimental efforts in search of 76Ge Neutrinoless Double Beta Decay,Somnath Choudhury,hep-ph,"  Neutrinoless double beta decay is one of the most sensitive approaches in
+0704.0063,Experimental efforts in search of 76Ge Neutrinoless Double Beta Decay,Somnath Choudhury,hep-ph,"  Neutrinoless double beta decay is one of the most sensitive approaches in
 non-accelerator particle physics to take us into a regime of physics beyond the
 standard model. This article is a brief review of the experiments in search of
 neutrinoless double beta decay from 76Ge. Following a brief introduction of the
@@ -907,7 +907,7 @@ oscillation matching the oscillation of the persistent current exactly. A
 number of equalities relating the observables and dynamical parameters have
 been found.
 ",J. Phys.: Condens. Matter 20 (2008) 055214,
-MISSING_PDF,Pairwise comparisons of typological profiles (of languages),S. Wichmann and E.W. Holman,physics.soc-ph,"  No abstract given; compares pairs of languages from World Atlas of Language
+0704.0071,Pairwise comparisons of typological profiles (of languages),S. Wichmann and E.W. Holman,physics.soc-ph,"  No abstract given; compares pairs of languages from World Atlas of Language
 Structures.
 ",,
 0704.0072,"The decomposition method and Maple procedure for finding first integrals
@@ -1113,7 +1113,7 @@ of $H^m$ and $H^n$. Then for each $\epsilon >0$ there exists a harmonic map
 $u:H^m\to H^n$ which is continuous up to the boundary (in the sense of
 Euclidean) and $u|_{\partial H^m}=(f^1,...,f^{n-1},\epsilon)$.
 ",,
-MISSING_PDF,Some new experimental photonic flame effect features,N.V.Tcherniega,physics.optics,"  The results of the spectral, energetical and temporal characteristics of
+0704.0088,Some new experimental photonic flame effect features,N.V.Tcherniega,physics.optics,"  The results of the spectral, energetical and temporal characteristics of
 radiation in the presence of the photonic flame effect are presented.
 Artificial opal posed on Cu plate at the temperature of liquid nitrogen boiling
 point (77 K) being irradiated by nanosecond ruby laser pulse produces long-
@@ -1144,7 +1144,7 @@ expressed by the mean square distance between data points. Both statistics are
 used in a new definition of predictor cost function. From the minimum of the
 predictor cost function, a proper number of data in the model is estimated.
 ",,
-MISSING_PDF,Real Options for Project Schedules (ROPS),Lester Ingber,cs.CE cond-mat.stat-mech cs.MS cs.NA physics.data-an,"  Real Options for Project Schedules (ROPS) has three recursive
+0704.0090,Real Options for Project Schedules (ROPS),Lester Ingber,cs.CE cond-mat.stat-mech cs.MS cs.NA physics.data-an,"  Real Options for Project Schedules (ROPS) has three recursive
 sampling/optimization shells. An outer Adaptive Simulated Annealing (ASA)
 optimization shell optimizes parameters of strategic Plans containing multiple
 Projects containing ordered Tasks. A middle shell samples probability
@@ -1362,7 +1362,7 @@ building blocks of ZDs). Remarkably simple bit-manipulation rules or ""recipes""
 provide tools for transforming one fractal genus into others within the context
 of Wolfram's Class 4 complexity.
 ",,
-MISSING_PDF,"Langmuir blodgett assembly of densely aligned single walled carbon
+0704.0113,"Langmuir blodgett assembly of densely aligned single walled carbon
   nanotubes from bulk materials","Xiaolin Li, Li Zhang, Xinran Wang, Iwao Shimoyama, Xiaoming Sun,
   Won-Seok Seo and Hongjie Dai (Department of Chemistry, Stanford University.)",cond-mat.mtrl-sci,"  Single walled carbon nanotubes exhibit advanced electrical and surface
 properties useful for high performance nanoelectronics. Important to future
@@ -1475,7 +1475,7 @@ the mass density and spin density are strongly coupled, depending upon trap
 geometries due to the long-range and anisotropic natures of the dipole-dipole
 interaction.
 ","Phys. Rev. Lett. 98, 260403 (2007)",10.1103/PhysRevLett.98.260403
-MISSING_PDF,"Nonlinear Dynamics of the Phonon Stimulated Emission in Microwave
+0704.0123,"Nonlinear Dynamics of the Phonon Stimulated Emission in Microwave
   Solid-State Resonator of the Nonautonomous Phaser Generator",D. N. Makovetskii,nlin.CD cond-mat.other physics.optics,"  The microwave phonon stimulated emission (SE) has been experimentally and
 numerically investigated in a nonautonomous microwave acoustic quantum
 generator, called also microwave phonon laser or phaser (see previous works
@@ -1513,7 +1513,7 @@ Interestingly, the I-V curves at zero magnetic field can still be scaled
 according to the quasi-2D vortex glass formalism, indicating an equivalent
 effect of self-field due to persistent current and applied magnetic field.
 ","Phys. Rev. B 76, 134513 (2007)",10.1103/PhysRevB.76.134513
-MISSING_PDF,Magnetic Fingerprints of sub-100 nm Fe Nanodots,"Randy K. Dumas, Chang-Peng Li, Igor V. Roshchin, Ivan K. Schuller and
+0704.0127,Magnetic Fingerprints of sub-100 nm Fe Nanodots,"Randy K. Dumas, Chang-Peng Li, Igor V. Roshchin, Ivan K. Schuller and
   Kai Liu",cond-mat.mtrl-sci,"  Sub-100 nm nanomagnets not only are technologically important, but also
 exhibit complex magnetization reversal behaviors as their dimensions are
 comparable to typical magnetic domain wall widths. Here we capture magnetic
@@ -1868,7 +1868,7 @@ has an excitation gap of $2\Delta$, in agreement with the quantum result. The
 collective response is studied for a simplified form of the residual
 interaction.
 ","Nucl.Phys.A800:1-20,2008",10.1016/j.nuclphysa.2007.11.009
-MISSING_PDF,"Reciprocal Symmetry and Classical Discrete Oscillator Incorporating
+0704.0153,"Reciprocal Symmetry and Classical Discrete Oscillator Incorporating
   Half-Integral Energy Levels",Mushfiq Ahmad,physics.gen-ph,"  Classical oscillator differential equation is replaced by the corresponding
 (finite time) difference equation. The equation is, then, symmetrized so that
 it remains invariant under the change d going to -d, where d is the smallest
@@ -1959,7 +1959,7 @@ rise to strong recombination lines of the metals, leading to the observed
 ORL-CEL discrepancy. (The full version of this work is submitted to Astronomy
 and Astrophysics.)
 ",,
-MISSING_PDF,"Soft modes and NTE in Zn(CN)2 from Raman spectroscopy and first
+0704.0161,"Soft modes and NTE in Zn(CN)2 from Raman spectroscopy and first
   principles calculations","T. R. Ravindran, A. K. Arora, Sharat Chandra, M. C. Valsakumar and N.
   V. Chandra Shekar",cond-mat.mtrl-sci,"  We have studied Zn(CN)2 at high pressure using Raman spectroscopy, and report
 Gruneisen parameters of the soft phonons. The phonon frequencies and eigen
@@ -2220,7 +2220,7 @@ sensitivity of the method, the small number of induced ferromagnetic Fe moments
 at the FeMn-Co interface is sufficient to obtain magnetic contrast from XMLD in
 a metallic system.
 ","Phys. Rev. B 75, 224406 (2007)",10.1103/PhysRevB.75.224406
-MISSING_PDF,"Temperature Dependence of the Tensile Properties of Single Walled Carbon
+0704.0183,"Temperature Dependence of the Tensile Properties of Single Walled Carbon
   Nanotubes: O(N) Tight Binding MD Simulation","G. Dereli and B. Sungu (Yildiz Tech. Univ., Istanbul)",cond-mat.mtrl-sci,"  This paper examines the effect of temperature on the structural stability and
 mechanical properties of 20 layered (10,10) single walled carbon nanotubes
 (SWCNTs) under tensile loading using an O(N) tight binding molecular dynamics
@@ -2344,7 +2344,7 @@ the direction of the incident neutrino for the neutrino events occurring inside
 the detector in the SK analysis turns out to be unreliable, which holds
 irrespective of the existence and/or non-existence of the neutrino oscillation.
 ",,
-MISSING_PDF,Intricate Knots in Proteins: Function and Evolution,"Peter Virnau (1), Leonid A. Mirny (1,2), Mehran Kardar (1) ((1)
+0704.0191,Intricate Knots in Proteins: Function and Evolution,"Peter Virnau (1), Leonid A. Mirny (1,2), Mehran Kardar (1) ((1)
   Massachusetts Institute of Technology, Department of Physics, Cambridge, MA,
   United States of America, (2) Massachusetts Institute of Technology,
   Harvard-MIT Division of Health Science and Technology, Cambridge, MA, United
@@ -2775,7 +2775,7 @@ QCD-\v{C}erenkov radiation. An important aspect of the analysis is the
 subtraction of combinatorial backgrounds. Systematic uncertainties due to this
 subtraction and the flow harmonics $v_2$ and $v_4$ are investigated in detail.
 ","Int.J.Mod.Phys.E16:2005-2010,2007",10.1142/S0218301307007374
-MISSING_PDF,Exploring First Stars Era with GLAST,A. Kashlinsky and D. Band,astro-ph,"  Cosmic infrared background (CIB) includes emissions from objects inaccessible
+0704.0225,Exploring First Stars Era with GLAST,A. Kashlinsky and D. Band,astro-ph,"  Cosmic infrared background (CIB) includes emissions from objects inaccessible
 to current telescopic studies, such as the putative Population III, the first
 stars. Recently, strong direct evidence for significant CIB levels produced by
 the first stars came from CIB fluctuations discovered in deep Spitzer images.
@@ -2805,7 +2805,7 @@ disc at 10 r_g around a black hole of 10^7 M_sun. Given the shape of the
 redshfted line emission and the overall X-ray variability pattern, the line is
 likely to arise from the relativistic region near the black hole.
 ",,10.1051/0004-6361:20066713
-MISSING_PDF,Isotopic Effects in Nuclear Reactions at Relativistic Energies,"C.Sfienti, M. De Napoli, S. Bianchin, A.S. Botvina, J. Brzychczyk, A.
+0704.0227,Isotopic Effects in Nuclear Reactions at Relativistic Energies,"C.Sfienti, M. De Napoli, S. Bianchin, A.S. Botvina, J. Brzychczyk, A.
   Le Fevre, J. Lukasik, P. Pawlowski, W. Trautmann and the ALADiN2000
   Collaboration",nucl-ex,"  A systematic study of isotopic effects in the break-up of projectile
 spectators at relativistic energies has been performed at the GSI laboratory
@@ -3528,7 +3528,7 @@ plausible missing energy term is the energy released by recombination in the
 common envelope, and, indeed, a simple reformulation the energy budget
 explicitly including recombination resolves this issue.
 ",,10.1007/978-1-4020-6544-6_13
-MISSING_PDF,The Source of Turbulence in Astrophysical Disks: An Ill-posed Problem.,Denis Richard,astro-ph,"  An critical overview of the current state of research in turbulence in
+0704.0281,The Source of Turbulence in Astrophysical Disks: An Ill-posed Problem.,Denis Richard,astro-ph,"  An critical overview of the current state of research in turbulence in
 astrophysical disks.
 ",,
 0704.0282,On Punctured Pragmatic Space-Time Codes in Block Fading Channel,"Samuele Bandi, Luca Stabellini, Andrea Conti and Velio Tralli",cs.IT cs.CC math.IT,"  This paper considers the use of punctured convolutional codes to obtain
@@ -4186,7 +4186,7 @@ that for QCD at $\mu \ne 0$, which has a sign problem, the discontinuity in the
 chiral condensate is due to an alternative to the Banks-Casher relation. The
 severity of the sign problem is analyzed in the microscopic domain of QCD.
 ","Prog.Theor.Phys.Suppl.168:265-275,2007",10.1143/PTPS.168.265
-MISSING_PDF,"Symmetries by base substitutions in the genetic code predict 2' or 3'
+0704.0331,"Symmetries by base substitutions in the genetic code predict 2' or 3'
   aminoacylation of tRNAs","J.-L. Jestin, C. Soule (IHES)",q-bio.OT,"  This letter reports complete sets of two-fold symmetries between partitions
 of the universal genetic code. By substituting bases at each position of the
 codons according to a fixed rule, it happens that properties of the degeneracy
@@ -4219,7 +4219,7 @@ our analysis to Nd$_{2-x}$Ce$_x$CuO$_4$. We show that our model can explain
 many features of the optical conductivity in this compounds in terms of
 magnetic/lattice polaron formation.
 ",,10.1016/j.physb.2007.10.107
-MISSING_PDF,A Multiphilic Descriptor for Chemical Reactivity and Selectivity,"J. Padmanabhan (1,2), R. Parthasarathi (2), M. Elango (2), V.
+0704.0334,A Multiphilic Descriptor for Chemical Reactivity and Selectivity,"J. Padmanabhan (1,2), R. Parthasarathi (2), M. Elango (2), V.
   Subramanian (2), B. S. Krishnamoorthy (1,3), S. Gutierrez-Oliva (4), A.
   Toro-Labbe (4), D. R. Roy (1) and P. K. Chattaraj (1)",physics.chem-ph,"  In line with the local philicity concept proposed by Chattaraj et al.
 (Chattaraj, P. K.; Maiti, B.; Sarkar, U. J. Phys. Chem. A. 2003, 107, 4973) and
@@ -4271,7 +4271,7 @@ homoclinic cycles lead to bursts of the Euler solution measured in Sobolev
 norms of order higher than that corresponding to the enstrophy.
 ","Instability in models connected with fluid flows I, Int. Math.
   Ser. (N. Y.), 6, (Springer, New York, 2008), 301--338",
-MISSING_PDF,"Synergistic Effects of MoDTC and ZDTP on Frictional Behaviour of
+0704.0338,"Synergistic Effects of MoDTC and ZDTP on Frictional Behaviour of
   Tribofilms at the Nanometer Scale","Sandrine Bec (LTDS), Andr\'e Tonck (LTDS), Jean-Marie Georges (LTDS),
   Glyn W. Roper (SHELL)",cond-mat.mtrl-sci,"  The layered structure and the rheological properties of anti-wear films,
 generated in a rolling/sliding contact from lubricants containing zinc
@@ -4461,7 +4461,7 @@ young age and compact structure of 1045+352 is consistent with the evolution
 scenario of BAL quasars. It has also been confirmed that the submillimetre flux
 of 1045+352 can be seriously contaminated by synchrotron emission.
 ",,10.1051/0004-6361:20066364
-MISSING_PDF,"Investigation of relaxation phenomena in high-temperature
+0704.0352,"Investigation of relaxation phenomena in high-temperature
   superconductors HoBa2Cu3O7-d at the action of pulsed magnetic fields","J.G. Chigvinadze, J.V. Acrivos, S.M. Ashimov, A.A. Iashvili, T. V.
   Machaidze, Th. Wolf",cond-mat.soft cond-mat.supr-con,"  It is used the mechanical method of Abrikosov vortex stimulated dynamics
 investigation in superconductors. With its help it was studied relaxation
@@ -4711,7 +4711,7 @@ of \sin^2 2\theta_{23} is not too close to one. In this talk, we discuss how
 such a constraint would translate into limits on the coupling constants and
 masses of new particles in models such as topcolor assisted technicolor.
 ",,10.1142/9789812790750_0027
-MISSING_PDF,"Shaped angular dependence of the spin transfer torque and microwave
+0704.0370,"Shaped angular dependence of the spin transfer torque and microwave
   generation without magnetic field","O. Boulle, V. Cros, J. Grollier, L. G. Pereira, C. Deranlot, F.
   Petroff, G. Faini, J. Barnas, A. Fert",cond-mat.mtrl-sci,"  The generation of oscillations in the microwave frequency range is one of the
 most important applications expected from spintronics devices exploiting the
@@ -4765,7 +4765,7 @@ motion for the radial component of the momentum for the Hydrogen atom.
 0704.0374,"Gravity-induced electric polarization of matter and planetary magnetic
   fields","Boris A. Zon, Igor Yu. Kretinin",physics.geo-ph,"  This paper has been withdrawn due to copyright reasons.
 ",,
-MISSING_PDF,"Rich methane premixed laminar flames doped by light unsaturated
+0704.0375,"Rich methane premixed laminar flames doped by light unsaturated
   hydrocarbons - Part I : allene and propyne","Hadj-Ali Gueniche (DCPR), Pierre-Alexandre Glaude (DCPR), Guillaume
   Dayma (DCPR), Ren\'e Fournet (DCPR), Fr\'ed\'erique Battin-Leclerc (DCPR)",physics.chem-ph,"  The structure of three laminar premixed rich flames has been investigated: a
 pure methane flame and two methane flames doped by allene and propyne,
@@ -4822,7 +4822,7 @@ functional defined on admissible vectors of measures. In addition, we show that
 each of the other components is the limiting measure of the normalized counting
 measure on certain generalized eigenvalues.
 ",,
-MISSING_PDF,Capturing knots in polymers,"P. Virnau, M. Kardar, and Y. Kantor",cond-mat.soft cond-mat.stat-mech,"  This paper visualizes a knot reduction algorithm
+0704.0379,Capturing knots in polymers,"P. Virnau, M. Kardar, and Y. Kantor",cond-mat.soft cond-mat.stat-mech,"  This paper visualizes a knot reduction algorithm
 ","Chaos 15, 041103 (2005)",10.1063/1.2130690
 0704.0380,Exponential growth rates in a typed branching diffusion,"Y. Git, J. W. Harris, S. C. Harris",math.PR,"  We study the high temperature phase of a family of typed branching diffusions
 initially studied in [Ast\'{e}risque 236 (1996) 133--154] and [Lecture Notes in
@@ -4859,7 +4859,7 @@ nonabelian groups and, by using classical tools from Additive Number Theory,
 extend some of the above results. In particular we obtain short proofs of
 Balandraud's results in the abelian case.
 ","J. de Theorie des Nombres de Bordeaux, 20 (2008) 125--130",
-MISSING_PDF,"The Exact Boundary Condition to Solve the Schrodinger Equation of Many
+0704.0383,"The Exact Boundary Condition to Solve the Schrodinger Equation of Many
   Electron System",Rajendra Prasad,cond-mat.str-el,"  In an attempt to bypass the sign problem in quantum Monte Carlo simulation of
 electronic systems within the framework of fixed node approach, we derive the
 exclusion principle ""Two electrons can't be at the same external isopotential
@@ -4983,7 +4983,7 @@ important role of the nuclear state is shown and methods of its calculation for
 different regimes of optical excitation are proposed. The effect of spin echo
 observed after application of the magnetic field $\pi$-pulse is predicted.
 ",,10.1134/S1063776107100159
-MISSING_PDF,Simulation of Robustness against Lesions of Cortical Networks,"Marcus Kaiser, Robert Martin, Peter Andras and Malcolm P. Young",q-bio.NC cond-mat.dis-nn physics.soc-ph,"  Structure entails function and thus a structural description of the brain
+0704.0392,Simulation of Robustness against Lesions of Cortical Networks,"Marcus Kaiser, Robert Martin, Peter Andras and Malcolm P. Young",q-bio.NC cond-mat.dis-nn physics.soc-ph,"  Structure entails function and thus a structural description of the brain
 will help to understand its function and may provide insights into many
 properties of brain systems, from their robustness and recovery from damage, to
 their dynamics and even their evolution. Advances in the analysis of complex
@@ -5093,7 +5093,7 @@ linear rate and this point on the boundary approaches to a point where the mean
 curvature of the boundary achieves its maximum. We also give a complete proof
 of exponential decay of least-energy solutions.
 ",,10.1093/imamat/hxl032
-MISSING_PDF,Review: Semiconductor Quantum Light Sources,Andrew J Shields,quant-ph,"  Lasers and LEDs display a statistical distribution in the number of photons
+0704.0403,Review: Semiconductor Quantum Light Sources,Andrew J Shields,quant-ph,"  Lasers and LEDs display a statistical distribution in the number of photons
 emitted in a given time interval. New applications exploiting the quantum
 properties of light require sources for which either individual photons, or
 pairs, are generated in a regulated stream. Here we review recent research on
@@ -5175,7 +5175,7 @@ and in addition detect a significant asymmetry between the electron and hole
 bands, leading to a difference in the electron and hole velocities of 5% by
 energies of 125 meV away from the Dirac point.
 ","Phys. Rev. B 76, 081406(R) (2007)",10.1103/PhysRevB.76.081406
-MISSING_PDF,Molecular circuits based on graphene nano-ribbon junctions,Zhiping Xu,cond-mat.mes-hall cond-mat.mtrl-sci,"  Graphene nano-ribbons junctions based electronic devices are proposed in this
+0704.0411,Molecular circuits based on graphene nano-ribbon junctions,Zhiping Xu,cond-mat.mes-hall cond-mat.mtrl-sci,"  Graphene nano-ribbons junctions based electronic devices are proposed in this
 Letter. Non-equilibrium Green function calculations show that nano-ribbon
 junctions tailored from single layer graphene with different edge shape and
 width can act as metal-semiconductor junctions and quantum dots can be
@@ -5212,7 +5212,7 @@ impinging beam for both structures. Many negative giant lateral shifts can be
 explained by the excitation of these leaky modes.
 ","journal of the european optical society : rapid publications 3
   (2008) 08032",10.2971/jeos.2008.08032
-MISSING_PDF,Coulomb blockade of field emission from nanoscale conductors,O. E. Raichev,cond-mat.mes-hall,"  Theoretical description of the field emission of electrons from nanoscale
+0704.0415,Coulomb blockade of field emission from nanoscale conductors,O. E. Raichev,cond-mat.mes-hall,"  Theoretical description of the field emission of electrons from nanoscale
 objects weakly coupled to the cathode is presented. It is shown that the field-
 emission current increases in a step-like fashion due to single-electron
 charging which leads to abrupt changes of the effective electric field
@@ -5311,7 +5311,7 @@ Lanzhou, China, delivering the uranium beam up to 520 MeV/nucleon is expected
 to make significant contribution to explore the nuclear equation of state
 (EoS).
 ","Phys.Rev.C76:044902,2007",10.1103/PhysRevC.76.044902
-MISSING_PDF,QED for fields obeying a square root operator equation,Tobias Gleim,hep-th,"  Instead of using local field equations - like the Dirac equation for spin-1/2
+0704.0425,QED for fields obeying a square root operator equation,Tobias Gleim,hep-th,"  Instead of using local field equations - like the Dirac equation for spin-1/2
 and the Klein-Gordon equation for spin-0 particles - one could try to use
 non-local field equations in order to describe scattering processes. The latter
 equations can be obtained by means of the relativistic energy together with the
@@ -5425,7 +5425,7 @@ treatment of different types of boundary problems in an unified way. In
 particular we obtain a smooth transition to the infinitesimal version by using
 a current with a one point support.
 ","Int. J. Geom. Methods Mod. Phys. 6 (2009), 173-200",10.1142/S0219887809003461
-MISSING_PDF,"Protein and ionic surfactants - promoters and inhibitors of contact line
+0704.0434,"Protein and ionic surfactants - promoters and inhibitors of contact line
   pinning",Viatcheslav V. Berejnov,physics.chem-ph physics.flu-dyn,"  We report a new effect of surfactants in pinning a drop contact line,
 specifically that lysozyme promotes while lauryl sulfate inhibits pinning. We
 explain the pinning disparity assuming difference in wetting: the protein-laden
@@ -5669,7 +5669,7 @@ reduction process is to remove an anisotropic leading edge gap around the Fermi
 surface. While the nodal leading edge gap is induced by long-range
 antiferomagnetic order, the origin of the antinodal one remains unclear.
 ","Physical Review Letters 99, 157002 (2007)",10.1103/PhysRevLett.99.157002
-MISSING_PDF,An Extrasolar Planet Census with a Space-based Microlensing Survey,"D.P. Bennett, J. Anderson, J.-P. Beaulieu, I. Bond, E. Cheng, K. Cook,
+0704.0454,An Extrasolar Planet Census with a Space-based Microlensing Survey,"D.P. Bennett, J. Anderson, J.-P. Beaulieu, I. Bond, E. Cheng, K. Cook,
   S. Friedman, B.S. Gaudi, A. Gould, J. Jenkins, R. Kimble, D. Lin, M. Rich, K.
   Sahu, D. Tenerelli, A. Udalski, and P. Yock",astro-ph,"  A space-based gravitational microlensing exoplanet survey will provide a
 statistical census of exoplanets with masses down to 0.1 Earth-masses and
@@ -5796,7 +5796,7 @@ independent interactions that individually give exponential decay of the
 entanglement can cause the entanglement to not decay exponentially but,
 instead, go to zero at a finite time.
 ",,10.1103/PhysRevA.76.022102
-MISSING_PDF,Extended solar emission - an analysis of the EGRET data,"Elena Orlando, Dirk Petry and Andrew Strong",astro-ph,"  The Sun was recently predicted to be an extended source of gamma-ray
+0704.0462,Extended solar emission - an analysis of the EGRET data,"Elena Orlando, Dirk Petry and Andrew Strong",astro-ph,"  The Sun was recently predicted to be an extended source of gamma-ray
 emission, produced by inverse-Compton scattering of cosmic-ray electrons with
 the solar radiation. The emission was predicted to contribute to the diffuse
 extragalactic background even at large angular distances from the Sun. While
@@ -6152,7 +6152,7 @@ of the noncentral equal scalar and vector potentials. The results obtained in
 this work are more general and can be reduced to the standard forms in
 three-dimensions given by other works.
 ","Cent. Eur. J. Phys. 6, 141(2008)",10.2478/s11534-008-0018-0
-MISSING_PDF,Long Distance Signaling Using Axion-like Particles,Daniel D. Stancil,hep-ph astro-ph hep-th,"  The possible existence of axion-like particles could lead to a new type of
+0704.0490,Long Distance Signaling Using Axion-like Particles,Daniel D. Stancil,hep-ph astro-ph hep-th,"  The possible existence of axion-like particles could lead to a new type of
 long distance communication. In this work, basic antenna concepts are defined
 and a Friis-like equation is derived to facilitate long-distance link
 calculations. An example calculation is presented showing that communication
@@ -6170,7 +6170,7 @@ situations not covered by previous works. We test our predicted percolation
 criterion against numerical results for different networks and node removal
 strategies.
 ",,10.1103/PhysRevLett.100.058701
-MISSING_PDF,Refuting the Pseudo Attack on the REESSE1+ Cryptosystem,"Shenghui Su, and Shuwang Lu",cs.CR,"  We illustrate through example 1 and 2 that the condition at theorem 1 in [8]
+0704.0492,Refuting the Pseudo Attack on the REESSE1+ Cryptosystem,"Shenghui Su, and Shuwang Lu",cs.CR,"  We illustrate through example 1 and 2 that the condition at theorem 1 in [8]
 dissatisfies necessity, and the converse proposition of fact 1.1 in [8] does
 not hold, namely the condition Z/M - L/Ak < 1/(2 Ak^2) is not sufficient for
 f(i) + f(j) = f(k). Illuminate through an analysis and ex.3 that there is a

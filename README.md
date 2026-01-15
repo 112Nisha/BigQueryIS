@@ -4,6 +4,8 @@
 ```
 pip install tika
 pip install pyspark
+pip install pyarrow
+pip install fastparquet
 pip install apache-airflow
 ```
 
@@ -11,6 +13,12 @@ pip install apache-airflow
 ```
 export AIRFLOW_HOME=<path/to/dir/airflow> # note the airflow dir
 ```
+
+## Order to run the files in:
+
+1. getData
+2. convertData
+3. 
 
 ## Running Airflow
 ```

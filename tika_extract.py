@@ -1,7 +1,7 @@
 from tika import parser
+import tika
 import os
 import json
-import tika
 import re
 
 tika.initVM()
