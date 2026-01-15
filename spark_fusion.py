@@ -1,66 +1,165 @@
+# ================================
+# Spark: Structured + Unstructured Fusion
+# ================================
+
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, length, trim
-from pyspark.sql.functions import regexp_replace, trim
-import os
+from pyspark.sql.functions import udf, col, explode, split
+from pyspark.sql.types import StringType
+import pandas as pd
 
-# ADD HIVE SUPPORT
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-STRUCTURED_CSV = os.path.join(BASE_DIR, "data", "structured", "diabetes.csv")
-EXTRACTED_JSON = os.path.join(BASE_DIR, "data", "extracted_text.json")
-OUTPUT_DIR = os.path.join(BASE_DIR, "data", "output", "fused_multimodal_generic")
-
+# --------------------------------
+# 1. Start Spark
+# --------------------------------
 spark = SparkSession.builder \
-    .appName("Generic-Multimodal-Fusion") \
+    .appName("arxiv-structured-unstructured-fusion") \
     .getOrCreate()
 
-structured_df = spark.read.csv(
-    STRUCTURED_CSV,
-    header=True,
-    inferSchema=True
+spark.sparkContext.setLogLevel("WARN")
+
+# --------------------------------
+# 2. File paths
+# --------------------------------
+STRUCTURED_CSV = "arxiv_metadata.csv"
+UNSTRUCTURED_JSONL = "data/tika_extracted.jsonl"
+
+# --------------------------------
+# 3. Load structured data (CSV)
+# --------------------------------
+df_structured = spark.read \
+    .option("header", True) \
+    .option("multiLine", True) \
+    .option("quote", "\"") \
+    .option("escape", "\"") \
+    .option("mode", "PERMISSIVE") \
+    .option("inferSchema", False) \
+    .csv(STRUCTURED_CSV)
+
+
+
+print("Structured schema:")
+df_structured.printSchema()
+
+# --------------------------------
+# 4. Load unstructured data (Tika JSONL)
+# --------------------------------
+df_unstructured = spark.read.json(
+    UNSTRUCTURED_JSONL
 )
 
-structured_df = structured_df.toDF(
-    *[c.strip() for c in structured_df.columns]
+print("Unstructured schema:")
+df_unstructured.printSchema()
+
+# --------------------------------
+# 5. ID normalization UDF (YOUR LOGIC)
+# --------------------------------
+def normalize_id(x):
+    """
+    Canonical arXiv ID normalization:
+    - pad left side to 4 digits (LEFT padding)
+    - pad right side to 4 digits (RIGHT padding)
+    """
+    if x is None:
+        return None
+
+    x = str(x)
+
+    if "." not in x:
+        return x
+
+    left, right = x.split(".", 1)
+
+    left = left.zfill(4)
+    right = right.ljust(4, "0")
+
+    return f"{left}.{right}"
+
+normalize_id_udf = udf(normalize_id, StringType())
+
+# --------------------------------
+# 6. Normalize IDs on BOTH datasets
+# --------------------------------
+df_structured_norm = df_structured.withColumn(
+    "norm_id",
+    normalize_id_udf(col("id"))
 )
 
-unstructured_df = spark.read.option("multiLine", True).json(
-    EXTRACTED_JSON
+df_unstructured_norm = df_unstructured.withColumn(
+    "norm_id",
+    normalize_id_udf(col("paper_id"))
 )
 
 
-if "text" in unstructured_df.columns:
-    unstructured_df = unstructured_df.withColumn(
-        "text",
-        trim(
-            regexp_replace(col("text"), r"\s+", " ")
-        )
-    )
 
-structured_cols = structured_df.columns
-unstructured_cols = unstructured_df.columns
-
-for c in unstructured_cols:
-    if c in structured_cols:
-        unstructured_df = unstructured_df.withColumnRenamed(
-            c, f"unstructured_{c}"
-        )
-
-fused_df = structured_df.join(
-    unstructured_df,
-    structured_df["document_name"] == unstructured_df["file_name"],
+# --------------------------------
+# 7. Join structured + unstructured data
+# --------------------------------
+df_fused = df_structured_norm.join(
+    df_unstructured_norm,
+    on="norm_id",
     how="left"
 )
 
-final_df = fused_df
-
-
-
-final_df.write.mode("overwrite").parquet(
-    OUTPUT_DIR
+# --------------------------------
+# 8. Select unified schema
+# --------------------------------
+df_final = df_fused.select(
+    col("id").alias("original_id"),
+    col("title"),
+    col("authors"),
+    col("categories"),
+    col("content_type"),
+    col("created"),
+    col("abstract"),
+    col("full_text"),
+    col("num_pages"),
+    col("char_count"),
+    col("word_count")
 )
 
-print("Spark fusion complete - merged unstructured and structured data")
+print("Final unified schema:")
+df_final.printSchema()
 
-# final_df.show(truncate=100)
+# --------------------------------
+# 9. Sanity checks (DO NOT SKIP)
+# --------------------------------
+total_rows = df_final.count()
+rows_with_text = df_final.filter(col("full_text").isNotNull()).count()
+rows_without_text = df_final.filter(col("full_text").isNull()).count()
+
+print("===== SANITY CHECKS =====")
+print(f"Total rows            : {total_rows}")
+print(f"Rows WITH PDF text    : {rows_with_text}")
+print(f"Rows WITHOUT PDF text : {rows_without_text}")
+
+# --------------------------------
+# 10. (Optional) Text chunking (Step 3)
+# --------------------------------
+df_chunks = df_final \
+    .filter(col("full_text").isNotNull()) \
+    .withColumn(
+        "chunk_text",
+        explode(split(col("full_text"), "\n\n"))
+    ) \
+    .select(
+        col("original_id"),
+        col("chunk_text")
+    )
+
+print("Chunked schema:")
+df_chunks.printSchema()
+
+# --------------------------------
+# 11. Save outputs (optional)
+# --------------------------------
+
+# Save unified data (for BigQuery / Hive / Parquet)
+df_final.write.mode("overwrite").parquet("output/unified_documents")
+
+# Save chunked text
+df_chunks.write.mode("overwrite").parquet("output/text_chunks")
+
+print("✅ Spark fusion pipeline completed successfully")
+
+
+df = pd.read_parquet("output/unified_documents")
+print(df.head())
