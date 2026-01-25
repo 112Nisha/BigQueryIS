@@ -34,8 +34,6 @@ df_structured = spark.read \
     .option("inferSchema", False) \
     .csv(STRUCTURED_CSV)
 
-
-
 print("Structured schema:")
 df_structured.printSchema()
 
@@ -87,8 +85,6 @@ df_unstructured_norm = df_unstructured.withColumn(
     "norm_id",
     normalize_id_udf(col("paper_id"))
 )
-
-
 
 # --------------------------------
 # 7. Join structured + unstructured data
@@ -233,8 +229,7 @@ df_roles = df_sections.withColumn(
     .when(col("section_name").isin("method", "methodology", "experiment", "results"), "HOW")
     .when(col("section_name") == "conclusion", "WHY")
 )
-
-
+    
 from pyspark.sql.functions import split, explode, trim, length
 
 df_sentences = df_roles \

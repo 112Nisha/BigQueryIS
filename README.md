@@ -7,6 +7,7 @@ pip install pyspark
 pip install pyarrow
 pip install fastparquet
 pip install apache-airflow
+pip install fitz
 ```
 
 **Environment Variables**
