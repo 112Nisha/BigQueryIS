@@ -161,5 +161,130 @@ df_chunks.write.mode("overwrite").parquet("output/text_chunks")
 print("✅ Spark fusion pipeline completed successfully")
 
 
-df = pd.read_parquet("output/unified_documents")
-print(df.head())
+from pyspark.sql.functions import lower, regexp_extract
+from pyspark.sql.types import ArrayType, StructType, StructField
+def extract_sections(text):
+    if text is None:
+        return []
+
+    text_l = text.lower()
+
+    markers = [
+        ("abstract", "abstract"),
+        ("introduction", "introduction"),
+        ("method", "method"),
+        ("methodology", "methodology"),
+        ("experiment", "experiment"),
+        ("results", "results"),
+        ("conclusion", "conclusion")
+    ]
+
+    positions = []
+    for name, marker in markers:
+        idx = text_l.find(marker)
+        if idx != -1:
+            positions.append((idx, name))
+
+    if not positions:
+        return []
+
+    positions.sort()
+    sections = []
+
+    for i, (start, name) in enumerate(positions):
+        end = positions[i + 1][0] if i + 1 < len(positions) else len(text)
+        sections.append({
+            "section_name": name,
+            "section_text": text[start:end].strip()
+        })
+
+    return sections
+
+
+section_schema = ArrayType(
+    StructType([
+        StructField("section_name", StringType(), True),
+        StructField("section_text", StringType(), True)
+    ])
+)
+
+extract_sections_udf = udf(extract_sections, section_schema)
+
+
+df_sections = df_final \
+    .filter(col("full_text").isNotNull()) \
+    .withColumn("sections", extract_sections_udf(col("full_text"))) \
+    .select(col("original_id"), explode(col("sections")).alias("sec")) \
+    .select(
+        col("original_id"),
+        col("sec.section_name"),
+        col("sec.section_text")
+    )
+
+df_sections.printSchema()
+
+
+from pyspark.sql.functions import when
+
+df_roles = df_sections.withColumn(
+    "semantic_role",
+    when(col("section_name") == "abstract", "WHAT")
+    .when(col("section_name") == "introduction", "WHY")
+    .when(col("section_name").isin("method", "methodology", "experiment", "results"), "HOW")
+    .when(col("section_name") == "conclusion", "WHY")
+)
+
+
+from pyspark.sql.functions import split, explode, trim, length
+
+df_sentences = df_roles \
+    .withColumn("sentence", explode(split(col("section_text"), r'(?<=[.!?])\s+'))) \
+    .withColumn("sentence", trim(col("sentence"))) \
+    .filter(length(col("sentence")) > 10)
+
+
+from pyspark.ml.feature import Tokenizer, HashingTF, IDF
+
+tokenizer = Tokenizer(inputCol="sentence", outputCol="words")
+words_df = tokenizer.transform(df_sentences)
+
+hashingTF = HashingTF(
+    inputCol="words",
+    outputCol="rawFeatures",
+    numFeatures=10000
+)
+
+tf_df = hashingTF.transform(words_df)
+
+idf = IDF(inputCol="rawFeatures", outputCol="tfidf")
+idf_model = idf.fit(tf_df)
+tfidf_df = idf_model.transform(tf_df)
+
+
+from pyspark.sql.window import Window
+from pyspark.sql.functions import row_number, size
+df_scored = tfidf_df.withColumn(
+    "score",
+    size(col("words"))
+)
+
+window = Window.partitionBy("original_id", "semantic_role").orderBy(col("score").desc())
+
+df_summary = df_scored \
+    .filter(col("semantic_role").isNotNull()) \
+    .withColumn("rank", row_number().over(window)) \
+    .filter(col("rank") == 1) \
+    .select("original_id", "semantic_role", "sentence")
+
+
+df_summary.write \
+    .mode("overwrite") \
+    .parquet("output/paper_explanations")
+
+import pandas as pd
+
+df_pd = pd.read_parquet("output/paper_explanations")
+pd.set_option("display.max_colwidth", None)
+pd.set_option("display.width", None)
+
+print(df_pd.head(10))
