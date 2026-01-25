@@ -68,9 +68,8 @@ This improves on the original with:
   - Removes arXiv artifacts  
   - Preserves paragraph structure
 
----
 
-## 2. tika_extract_advanced.py – PyMuPDF + Tika Hybrid
+## 2. tika_extract_advanced.py – PyMuPDF + Tika Hybrid - CAN REMOVE
 
 This provides superior extraction using PyMuPDF:
 
