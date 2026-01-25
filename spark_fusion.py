@@ -157,29 +157,54 @@ df_chunks.write.mode("overwrite").parquet("output/text_chunks")
 print("✅ Spark fusion pipeline completed successfully")
 
 
-from pyspark.sql.functions import lower, regexp_extract
-from pyspark.sql.types import ArrayType, StructType, StructField
+# ================================
+# INSIGHT EXTRACTION PIPELINE
+# Using YAKE keywords + TextRank-style sentence scoring
+# ================================
+
+import re
+import yake
+from collections import Counter
+from pyspark.sql.functions import lower, when, split, trim, length, collect_list, concat_ws
+from pyspark.sql.types import ArrayType, StructType, StructField, FloatType
+from pyspark.sql.window import Window
+from pyspark.sql.functions import row_number
+
+# --------------------------------
+# 12. Extract sections with improved regex
+# --------------------------------
 def extract_sections(text):
+    """
+    Extract paper sections using regex patterns.
+    Handles various heading formats in academic papers.
+    """
     if text is None:
         return []
 
-    text_l = text.lower()
-
-    markers = [
-        ("abstract", "abstract"),
-        ("introduction", "introduction"),
-        ("method", "method"),
-        ("methodology", "methodology"),
-        ("experiment", "experiment"),
-        ("results", "results"),
-        ("conclusion", "conclusion")
+    # Patterns for section headers (handles "1. Introduction", "INTRODUCTION", "1 Introduction", etc.)
+    section_patterns = [
+        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?abstract[:\s]*\n', "abstract"),
+        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?introduction[:\s]*\n', "introduction"),
+        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:related\s+work|background|literature\s+review)[:\s]*\n', "background"),
+        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:method|methodology|approach|proposed\s+method)[:\s]*\n', "method"),
+        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:experiment|evaluation|results|empirical)[:\s]*\n', "results"),
+        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:discussion)[:\s]*\n', "discussion"),
+        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:conclusion|concluding\s+remarks|summary)[:\s]*\n', "conclusion"),
     ]
 
     positions = []
-    for name, marker in markers:
-        idx = text_l.find(marker)
-        if idx != -1:
-            positions.append((idx, name))
+    for pattern, name in section_patterns:
+        match = re.search(pattern, text)
+        if match:
+            positions.append((match.end(), name))
+
+    if not positions:
+        # Fallback: use simple keyword search
+        text_l = text.lower()
+        for name in ["abstract", "introduction", "method", "results", "conclusion"]:
+            idx = text_l.find(name)
+            if idx != -1:
+                positions.append((idx, name))
 
     if not positions:
         return []
@@ -188,11 +213,14 @@ def extract_sections(text):
     sections = []
 
     for i, (start, name) in enumerate(positions):
-        end = positions[i + 1][0] if i + 1 < len(positions) else len(text)
-        sections.append({
-            "section_name": name,
-            "section_text": text[start:end].strip()
-        })
+        end = positions[i + 1][0] if i + 1 < len(positions) else min(start + 15000, len(text))
+        section_text = text[start:end].strip()
+        # Limit section length to avoid memory issues
+        if len(section_text) > 50:
+            sections.append({
+                "section_name": name,
+                "section_text": section_text[:15000]
+            })
 
     return sections
 
@@ -206,80 +234,249 @@ section_schema = ArrayType(
 
 extract_sections_udf = udf(extract_sections, section_schema)
 
+# --------------------------------
+# 13. YAKE Keyword Extraction
+# --------------------------------
+def extract_keywords_yake(text, top_n=10):
+    """
+    Extract keywords using YAKE (Yet Another Keyword Extractor).
+    Returns top keywords with their scores.
+    """
+    if not text or len(text) < 50:
+        return []
+    
+    try:
+        # YAKE configuration for academic text
+        kw_extractor = yake.KeywordExtractor(
+            lan="en",
+            n=3,  # max n-gram size
+            dedupLim=0.7,  # deduplication threshold
+            top=top_n,
+            features=None
+        )
+        keywords = kw_extractor.extract_keywords(text[:10000])  # Limit input size
+        # Return keywords (lower score = more important in YAKE)
+        return [{"keyword": kw, "score": float(1 - score)} for kw, score in keywords]
+    except Exception:
+        return []
 
+
+keyword_schema = ArrayType(
+    StructType([
+        StructField("keyword", StringType(), True),
+        StructField("score", FloatType(), True)
+    ])
+)
+
+extract_keywords_udf = udf(extract_keywords_yake, keyword_schema)
+
+# --------------------------------
+# 14. TextRank-style Sentence Scoring
+# --------------------------------
+def score_sentences_textrank(text, top_n=3):
+    """
+    Score sentences using a simplified TextRank approach.
+    Ranks sentences by their similarity to the overall document.
+    """
+    if not text or len(text) < 100:
+        return []
+    
+    try:
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 30]
+        
+        if not sentences:
+            return []
+        
+        # Tokenize and count word frequencies
+        def tokenize(s):
+            return re.findall(r'\b[a-z]{3,}\b', s.lower())
+        
+        # Document-level word frequencies
+        all_words = []
+        for s in sentences:
+            all_words.extend(tokenize(s))
+        word_freq = Counter(all_words)
+        
+        # Score each sentence by sum of word importance
+        scored = []
+        for sent in sentences:
+            words = tokenize(sent)
+            if not words:
+                continue
+            # Score = average word frequency (normalized by sentence length)
+            score = sum(word_freq.get(w, 0) for w in words) / len(words)
+            # Penalize very short or very long sentences
+            if 50 < len(sent) < 500:
+                score *= 1.2
+            scored.append({"sentence": sent, "score": float(score)})
+        
+        # Sort by score descending
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:top_n]
+    
+    except Exception:
+        return []
+
+
+sentence_schema = ArrayType(
+    StructType([
+        StructField("sentence", StringType(), True),
+        StructField("score", FloatType(), True)
+    ])
+)
+
+score_sentences_udf = udf(score_sentences_textrank, sentence_schema)
+
+# --------------------------------
+# 15. Apply section extraction
+# --------------------------------
 df_sections = df_final \
     .filter(col("full_text").isNotNull()) \
     .withColumn("sections", extract_sections_udf(col("full_text"))) \
-    .select(col("original_id"), explode(col("sections")).alias("sec")) \
+    .select(col("original_id"), col("title"), explode(col("sections")).alias("sec")) \
     .select(
         col("original_id"),
-        col("sec.section_name"),
-        col("sec.section_text")
+        col("title"),
+        col("sec.section_name").alias("section_name"),
+        col("sec.section_text").alias("section_text")
     )
 
+print("Sections schema:")
 df_sections.printSchema()
 
-
-from pyspark.sql.functions import when
-
+# --------------------------------
+# 16. Assign semantic roles
+# --------------------------------
 df_roles = df_sections.withColumn(
     "semantic_role",
-    when(col("section_name") == "abstract", "WHAT")
-    .when(col("section_name") == "introduction", "WHY")
-    .when(col("section_name").isin("method", "methodology", "experiment", "results"), "HOW")
-    .when(col("section_name") == "conclusion", "WHY")
-)
-    
-from pyspark.sql.functions import split, explode, trim, length
-
-df_sentences = df_roles \
-    .withColumn("sentence", explode(split(col("section_text"), r'(?<=[.!?])\s+'))) \
-    .withColumn("sentence", trim(col("sentence"))) \
-    .filter(length(col("sentence")) > 10)
-
-
-from pyspark.ml.feature import Tokenizer, HashingTF, IDF
-
-tokenizer = Tokenizer(inputCol="sentence", outputCol="words")
-words_df = tokenizer.transform(df_sentences)
-
-hashingTF = HashingTF(
-    inputCol="words",
-    outputCol="rawFeatures",
-    numFeatures=10000
+    when(col("section_name") == "abstract", "OVERVIEW")
+    .when(col("section_name") == "introduction", "MOTIVATION")
+    .when(col("section_name") == "background", "CONTEXT")
+    .when(col("section_name").isin("method", "methodology"), "APPROACH")
+    .when(col("section_name").isin("results", "discussion"), "FINDINGS")
+    .when(col("section_name") == "conclusion", "TAKEAWAY")
 )
 
-tf_df = hashingTF.transform(words_df)
+# --------------------------------
+# 17. Extract keywords per section
+# --------------------------------
+df_keywords = df_roles \
+    .withColumn("keywords", extract_keywords_udf(col("section_text"))) \
+    .select(
+        col("original_id"),
+        col("title"),
+        col("section_name"),
+        col("semantic_role"),
+        explode(col("keywords")).alias("kw")
+    ) \
+    .select(
+        col("original_id"),
+        col("title"),
+        col("section_name"),
+        col("semantic_role"),
+        col("kw.keyword").alias("keyword"),
+        col("kw.score").alias("keyword_score")
+    )
 
-idf = IDF(inputCol="rawFeatures", outputCol="tfidf")
-idf_model = idf.fit(tf_df)
-tfidf_df = idf_model.transform(tf_df)
+print("Keywords schema:")
+df_keywords.printSchema()
 
+# --------------------------------
+# 18. Extract top sentences per section
+# --------------------------------
+df_top_sentences = df_roles \
+    .withColumn("top_sentences", score_sentences_udf(col("section_text"))) \
+    .select(
+        col("original_id"),
+        col("title"),
+        col("section_name"),
+        col("semantic_role"),
+        explode(col("top_sentences")).alias("sent")
+    ) \
+    .select(
+        col("original_id"),
+        col("title"),
+        col("section_name"),
+        col("semantic_role"),
+        col("sent.sentence").alias("key_sentence"),
+        col("sent.score").alias("sentence_score")
+    )
 
-from pyspark.sql.window import Window
-from pyspark.sql.functions import row_number, size
-df_scored = tfidf_df.withColumn(
-    "score",
-    size(col("words"))
-)
+print("Top sentences schema:")
+df_top_sentences.printSchema()
 
-window = Window.partitionBy("original_id", "semantic_role").orderBy(col("score").desc())
+# --------------------------------
+# 19. Create paper-level insights summary
+# --------------------------------
+# Aggregate keywords per paper
+df_paper_keywords = df_keywords \
+    .filter(col("keyword_score") > 0.3) \
+    .groupBy("original_id", "title") \
+    .agg(
+        collect_list("keyword").alias("all_keywords")
+    )
 
-df_summary = df_scored \
+# Get best sentence per semantic role
+window = Window.partitionBy("original_id", "semantic_role").orderBy(col("sentence_score").desc())
+
+df_best_sentences = df_top_sentences \
     .filter(col("semantic_role").isNotNull()) \
     .withColumn("rank", row_number().over(window)) \
     .filter(col("rank") == 1) \
-    .select("original_id", "semantic_role", "sentence")
+    .select("original_id", "semantic_role", "key_sentence")
 
+# Pivot to get one row per paper with all insights
+df_insights = df_best_sentences \
+    .groupBy("original_id") \
+    .pivot("semantic_role") \
+    .agg(concat_ws(" ", collect_list("key_sentence")))
 
-df_summary.write \
+# Join keywords with insights
+df_paper_insights = df_paper_keywords.join(df_insights, on="original_id", how="left")
+
+print("Paper insights schema:")
+df_paper_insights.printSchema()
+
+# --------------------------------
+# 20. Save outputs
+# --------------------------------
+
+# Save detailed keywords
+df_keywords.write \
     .mode("overwrite") \
-    .parquet("output/paper_explanations")
+    .parquet("output/paper_keywords")
 
+# Save top sentences
+df_top_sentences.write \
+    .mode("overwrite") \
+    .parquet("output/paper_sentences")
+
+# Save paper-level insights summary
+df_paper_insights.write \
+    .mode("overwrite") \
+    .parquet("output/paper_insights")
+
+print("✅ Insight extraction completed!")
+
+# --------------------------------
+# 21. Display sample results
+# --------------------------------
 import pandas as pd
 
-df_pd = pd.read_parquet("output/paper_explanations")
-pd.set_option("display.max_colwidth", None)
-pd.set_option("display.width", None)
+print("\n" + "="*60)
+print("SAMPLE PAPER INSIGHTS")
+print("="*60)
 
-print(df_pd.head(10))
+df_pd = pd.read_parquet("output/paper_insights")
+pd.set_option("display.max_colwidth", 100)
+pd.set_option("display.width", None)
+print(df_pd.head(5))
+
+print("\n" + "="*60)
+print("SAMPLE KEYWORDS")
+print("="*60)
+
+df_kw = pd.read_parquet("output/paper_keywords")
+print(df_kw.head(20))
