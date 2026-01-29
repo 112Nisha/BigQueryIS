@@ -48,7 +48,7 @@ print("Unstructured schema:")
 df_unstructured.printSchema()
 
 # --------------------------------
-# 5. ID normalization UDF (YOUR LOGIC)
+# 5. ID normalization UDF
 # --------------------------------
 def normalize_id(x):
     """
@@ -461,22 +461,127 @@ df_paper_insights.write \
 print("✅ Insight extraction completed!")
 
 # --------------------------------
-# 21. Display sample results
+# 21. Display sample results (Enhanced Formatting)
 # --------------------------------
 import pandas as pd
+import textwrap
 
-print("\n" + "="*60)
-print("SAMPLE PAPER INSIGHTS")
-print("="*60)
+def clean_text_for_display(text, max_width=60):
+    """Clean and wrap text for readable display."""
+    if text is None or pd.isna(text):
+        return "—"
+    # Remove excessive whitespace and normalize
+    text = str(text)
+    text = ' '.join(text.split())
+    # Clean up common math artifacts for readability
+    text = text.replace('\\n', ' ')
+    text = text.replace('  ', ' ')
+    # Wrap long text
+    if len(text) > max_width:
+        wrapped = textwrap.fill(text, width=max_width)
+        return wrapped
+    return text
+
+def format_keywords_list(keywords, max_display=8):
+    """Format keyword list for display."""
+    if keywords is None or (isinstance(keywords, float) and pd.isna(keywords)):
+        return "—"
+    if isinstance(keywords, list):
+        kw_list = keywords[:max_display]
+        formatted = ", ".join(kw_list)
+        if len(keywords) > max_display:
+            formatted += f" (+{len(keywords) - max_display} more)"
+        return formatted
+    return str(keywords)
+
+def print_section_header(title):
+    """Print a nicely formatted section header."""
+    print("\n")
+    print("┌" + "─" * 78 + "┐")
+    print("│" + title.center(78) + "│")
+    print("└" + "─" * 78 + "┘")
+
+def print_paper_card(row, index):
+    """Print a formatted paper insight card."""
+    print(f"\n{'━' * 80}")
+    print(f"  📄 Paper #{index + 1}")
+    print(f"{'━' * 80}")
+    
+    # Paper ID
+    paper_id = row.get('original_id', 'N/A')
+    print(f"  🔖 ID: {paper_id}")
+    
+    # Title
+    title = row.get('title', 'N/A')
+    if title and not pd.isna(title):
+        title_clean = clean_text_for_display(str(title), max_width=70)
+        print(f"  📌 Title: {title_clean}")
+    
+    # Keywords
+    keywords = row.get('all_keywords', None)
+    keywords_str = format_keywords_list(keywords)
+    print(f"\n  🏷️  Keywords:")
+    print(f"      {keywords_str}")
+    
+    # Insights by semantic role
+    roles = [
+        ('OVERVIEW', '📋', 'Overview'),
+        ('MOTIVATION', '💡', 'Motivation'),
+        ('CONTEXT', '📚', 'Context'),
+        ('APPROACH', '🔧', 'Approach'),
+        ('FINDINGS', '📊', 'Findings'),
+        ('TAKEAWAY', '✨', 'Takeaway')
+    ]
+    
+    print(f"\n  📝 Key Insights:")
+    for role_key, emoji, role_name in roles:
+        if role_key in row and row[role_key] and not pd.isna(row[role_key]):
+            insight_text = clean_text_for_display(str(row[role_key]), max_width=65)
+            # Indent multi-line text properly
+            lines = insight_text.split('\n')
+            print(f"      {emoji} {role_name}:")
+            for line in lines:
+                print(f"         {line}")
+
+def print_keywords_table(df_kw, max_rows=15):
+    """Print a nicely formatted keywords table."""
+    print(f"\n{'─' * 80}")
+    print(f"  {'Paper ID':<12} {'Section':<14} {'Role':<12} {'Keyword':<25} {'Score':>8}")
+    print(f"{'─' * 80}")
+    
+    for idx, row in df_kw.head(max_rows).iterrows():
+        paper_id = str(row.get('original_id', ''))[:10]
+        section = str(row.get('section_name', ''))[:12]
+        role = str(row.get('semantic_role', ''))[:10] if row.get('semantic_role') else '—'
+        keyword = str(row.get('keyword', ''))[:23]
+        score = row.get('keyword_score', 0)
+        
+        # Format score as bar + number
+        score_val = float(score) if score else 0
+        score_bar = '█' * int(score_val * 5) + '░' * (5 - int(score_val * 5))
+        
+        print(f"  {paper_id:<12} {section:<14} {role:<12} {keyword:<25} {score_bar} {score_val:.2f}")
+    
+    print(f"{'─' * 80}")
+    if len(df_kw) > max_rows:
+        print(f"  ... and {len(df_kw) - max_rows} more keywords")
+
+# Load and display data
+print_section_header("📊 PAPER INSIGHTS SUMMARY")
 
 df_pd = pd.read_parquet("output/paper_insights")
-pd.set_option("display.max_colwidth", 100)
-pd.set_option("display.width", None)
-print(df_pd.head(5))
+print(f"\n  Total papers with insights: {len(df_pd)}")
 
-print("\n" + "="*60)
-print("SAMPLE KEYWORDS")
-print("="*60)
+# Display top 3 papers as cards
+for idx, row in df_pd.head(3).iterrows():
+    print_paper_card(row.to_dict(), idx)
+
+print_section_header("🏷️  EXTRACTED KEYWORDS")
 
 df_kw = pd.read_parquet("output/paper_keywords")
-print(df_kw.head(20))
+print(f"\n  Total keyword extractions: {len(df_kw)}")
+print_keywords_table(df_kw, max_rows=15)
+
+print("\n" + "=" * 80)
+print("  ✅ Display complete! Data saved to output/ directory.")
+print("=" * 80 + "\n")
