@@ -1,12 +1,4 @@
-"""
-Enhanced Tika PDF Extraction with Better Table, Math, and Structure Handling
-
-This module provides improved extraction of:
-- Tables (preserved structure with delimiters)
-- Mathematical equations (LaTeX patterns preserved)
-- Document structure (sections, figures, captions)
-- References and citations
-"""
+# Extracting PDF information and metadata using Tika
 
 from tika import parser
 import os
@@ -23,11 +15,7 @@ OUTPUT_FILE = os.path.join(BASE_DIR, "data", "tika_extracted_enhanced.jsonl")
 os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
 
-# =============================================================================
-# MATH AND EQUATION PATTERNS
-# =============================================================================
-
-# Patterns to detect and preserve mathematical content
+# Patterns that represent mathematic content
 MATH_PATTERNS = {
     # LaTeX inline math
     'latex_inline': r'\$[^$]+\$',
@@ -45,84 +33,58 @@ MATH_PATTERNS = {
     'math_expressions': r'(?:sin|cos|tan|log|ln|exp|lim|max|min|sup|inf|det|dim|ker|im|arg)\s*\(',
 }
 
-# Combined regex for math detection
-MATH_DETECTION_REGEX = re.compile(
-    '|'.join(f'({pattern})' for pattern in MATH_PATTERNS.values()),
-    re.UNICODE
-)
+# Combined regex for mathematic content detection
+MATH_DETECTION_REGEX = re.compile('|'.join(f'({pattern})' for pattern in MATH_PATTERNS.values()),re.UNICODE)
 
-
-# =============================================================================
-# TABLE DETECTION AND EXTRACTION
-# =============================================================================
-
+# Returns a list of start and end positions of potential tables within the text
 def detect_table_regions(text: str) -> List[Dict]:
-    """
-    Detect potential table regions in text based on patterns.
-    Returns list of table regions with start/end positions.
-    """
     tables = []
     
-    # Pattern 1: Lines with multiple tab/space separations suggesting columns
     lines = text.split('\n')
     table_start = None
     table_lines = []
     
+    # If a line looks like a table row (multiple column-like separations), add the row as table content and add to the output list
+    # when the table ends (where there is no such row)
     for i, line in enumerate(lines):
-        # Check if line looks like a table row (multiple column-like separations)
-        # Count whitespace-separated "cells"
         cells = re.split(r'\s{2,}|\t', line.strip())
         cells = [c for c in cells if c.strip()]
-        
-        # Heuristic: line with 3+ cells that are short might be table row
-        is_table_row = (
-            len(cells) >= 2 and 
-            all(len(c) < 50 for c in cells) and
-            len(line.strip()) > 0
-        )
+        is_table_row = (len(cells) >= 2 and all(len(c) < 50 for c in cells) and len(line.strip()) > 0)
         
         if is_table_row:
             if table_start is None:
                 table_start = i
             table_lines.append(line)
         else:
-            # End of potential table
             if table_start is not None and len(table_lines) >= 2:
-                tables.append({
-                    'start_line': table_start,
-                    'end_line': i - 1,
-                    'content': '\n'.join(table_lines),
-                    'num_rows': len(table_lines)
-                })
+                tables.append({'start_line': table_start,'end_line': i - 1,'content': '\n'.join(table_lines),'num_rows': len(table_lines)})
             table_start = None
             table_lines = []
     
-    # Handle table at end of document
     if table_start is not None and len(table_lines) >= 2:
-        tables.append({
-            'start_line': table_start,
-            'end_line': len(lines) - 1,
-            'content': '\n'.join(table_lines),
-            'num_rows': len(table_lines)
-        })
+        tables.append({'start_line': table_start,'end_line': len(lines) - 1,'content': '\n'.join(table_lines),'num_rows': len(table_lines)})
     
     return tables
 
 
+# Extracts tables from the XML/HTML output that Tika generates
+
+def get_best_text(text_content, xml_content):
+    if xml_content and len(xml_content) > len(text_content):
+        return re.sub(r'<[^>]+>', ' ', xml_content)
+    return text_content
+
 def extract_tables_from_xml(xml_content: str) -> List[Dict]:
-    """
-    Extract tables from Tika's XML/HTML output.
-    """
     tables = []
     
     # Pattern for HTML table elements
     table_pattern = re.compile(r'<table[^>]*>(.*?)</table>', re.DOTALL | re.IGNORECASE)
     
+    # For each table, extract data, clean it, and add it to the list of tables
     for match in table_pattern.finditer(xml_content):
         table_html = match.group(0)
         table_content = match.group(1)
         
-        # Extract rows
         rows = []
         row_pattern = re.compile(r'<tr[^>]*>(.*?)</tr>', re.DOTALL | re.IGNORECASE)
         cell_pattern = re.compile(r'<t[dh][^>]*>(.*?)</t[dh]>', re.DOTALL | re.IGNORECASE)
@@ -130,7 +92,6 @@ def extract_tables_from_xml(xml_content: str) -> List[Dict]:
         for row_match in row_pattern.finditer(table_content):
             cells = []
             for cell_match in cell_pattern.finditer(row_match.group(1)):
-                # Clean cell content
                 cell_text = re.sub(r'<[^>]+>', '', cell_match.group(1))
                 cell_text = cell_text.strip()
                 cells.append(cell_text)
@@ -138,34 +99,25 @@ def extract_tables_from_xml(xml_content: str) -> List[Dict]:
                 rows.append(cells)
         
         if rows:
-            tables.append({
-                'rows': rows,
-                'num_rows': len(rows),
-                'num_cols': max(len(row) for row in rows) if rows else 0,
-                'markdown': convert_table_to_markdown(rows)
-            })
+            tables.append({'rows': rows,'num_rows': len(rows),'num_cols': max(len(row) for row in rows) if rows else 0,'markdown': convert_table_to_markdown(rows)})
     
     return tables
 
 
+# Converts tables to markdown format - convers the header row and data rows
 def convert_table_to_markdown(rows: List[List[str]]) -> str:
-    """Convert table rows to markdown format."""
     if not rows:
         return ""
     
     markdown_lines = []
-    
-    # Header row
+
     if rows:
         header = ' | '.join(rows[0])
         markdown_lines.append(f"| {header} |")
-        # Separator
         separator = ' | '.join(['---'] * len(rows[0]))
         markdown_lines.append(f"| {separator} |")
     
-    # Data rows
     for row in rows[1:]:
-        # Pad row if needed
         while len(row) < len(rows[0]):
             row.append('')
         data = ' | '.join(row[:len(rows[0])])
@@ -174,14 +126,8 @@ def convert_table_to_markdown(rows: List[List[str]]) -> str:
     return '\n'.join(markdown_lines)
 
 
-# =============================================================================
-# MATHEMATICAL EQUATION EXTRACTION
-# =============================================================================
-
+# Extracts mathematical equations from the given text
 def extract_equations(text: str) -> List[Dict]:
-    """
-    Extract mathematical equations from text.
-    """
     equations = []
     
     # Pattern 1: Numbered equations like (1), (2a), Eq. 1, etc.
@@ -190,46 +136,31 @@ def extract_equations(text: str) -> List[Dict]:
         re.MULTILINE
     )
     
+    # For each pattern, check if it looks like an equation, and if it does, add it to the output
     for match in eq_pattern.finditer(text):
         eq_content = match.group(1).strip()
         eq_number = match.group(2)
-        
-        # Check if it looks like an equation (contains math-like content)
         if MATH_DETECTION_REGEX.search(eq_content) or '=' in eq_content:
-            equations.append({
-                'content': eq_content,
-                'number': eq_number,
-                'type': 'numbered'
-            })
+            equations.append({'content': eq_content,'number': eq_number,'type': 'numbered'})
     
-    # Pattern 2: Lines that look like standalone equations
+    # Pattern 2: Lines that look like standalone equations - equations written on their own line
     for line in text.split('\n'):
         line = line.strip()
         if len(line) > 5 and len(line) < 200:
-            # Check for equation-like content
             math_chars = sum(1 for c in line if c in '=∝∞∑∏∫∂∇√±×÷≤≥≠≈≡+-*/^()')
             letter_count = sum(1 for c in line if c.isalpha())
-            
-            # Heuristic: high ratio of math chars to letters suggests equation
             if letter_count > 0 and math_chars / letter_count > 0.3:
                 if line not in [eq['content'] for eq in equations]:
-                    equations.append({
-                        'content': line,
-                        'number': None,
-                        'type': 'inline'
-                    })
+                    equations.append({'content': line,'number': None,'type': 'inline'})
     
     return equations
 
-
+# Converts common latex commands into readable mathematical symbols by detecting common latex patterns and applying the readable replacement to the input text
 def preserve_latex_patterns(text: str) -> str:
-    """
-    Preserve LaTeX patterns that might get mangled during extraction.
-    """
-    # Common LaTeX command patterns
+    # Common latex command patterns
     latex_commands = [
-        (r'\\frac\s*\{([^}]+)\}\s*\{([^}]+)\}', r'((\1)/(\2))'),  # fractions
-        (r'\\sqrt\s*\{([^}]+)\}', r'√(\1)'),  # square root
+        (r'\\frac\s*\{([^}]+)\}\s*\{([^}]+)\}', r'((\1)/(\2))'), 
+        (r'\\sqrt\s*\{([^}]+)\}', r'√(\1)'),  
         (r'\\sum', '∑'),
         (r'\\prod', '∏'),
         (r'\\int', '∫'),
@@ -257,8 +188,8 @@ def preserve_latex_patterns(text: str) -> str:
         (r'\\approx', '≈'),
         (r'\\equiv', '≡'),
         (r'\\propto', '∝'),
-        (r'\^(\d+)', r'<sup>\1</sup>'),  # superscripts
-        (r'_(\d+)', r'<sub>\1</sub>'),   # subscripts
+        (r'\^(\d+)', r'<sup>\1</sup>'),
+        (r'_(\d+)', r'<sub>\1</sub>'), 
     ]
     
     for pattern, replacement in latex_commands:
@@ -267,20 +198,14 @@ def preserve_latex_patterns(text: str) -> str:
     return text
 
 
-# =============================================================================
-# STRUCTURE EXTRACTION
-# =============================================================================
-
+# Extracts document sections like headers, abstract, etc. and outputs a list of paper with section information items
 def extract_sections(text: str) -> List[Dict]:
-    """
-    Extract document sections (headers, abstract, references, etc.)
-    """
     sections = []
     
-    # Common section headers in academic papers
+    # Common section headers in academic papers - includes roman numerals and numbered sections
     section_patterns = [
-        r'^(?:I{1,3}V?|IV|V?I{0,3})\.?\s+([A-Z][A-Z\s]+)$',  # Roman numerals
-        r'^(\d+\.?\s+[A-Z][A-Z\s]+)$',  # Numbered sections
+        r'^(?:I{1,3}V?|IV|V?I{0,3})\.?\s+([A-Z][A-Z\s]+)$',
+        r'^(\d+\.?\s+[A-Z][A-Z\s]+)$', 
         r'^(ABSTRACT|Abstract|INTRODUCTION|Introduction|METHODS?|Methods?|RESULTS?|Results?|DISCUSSION|Discussion|CONCLUSION|Conclusion|REFERENCES|References|ACKNOWLEDGMENT|Acknowledgment)s?:?\s*$',
     ]
     
@@ -291,20 +216,14 @@ def extract_sections(text: str) -> List[Dict]:
         for pattern in section_patterns:
             match = re.match(pattern, line_stripped)
             if match:
-                sections.append({
-                    'title': line_stripped,
-                    'line_number': i,
-                    'type': 'section_header'
-                })
+                sections.append({'title': line_stripped,'line_number': i,'type': 'section_header'})
                 break
     
     return sections
 
 
+# Extracts captions from figures and tables and outputs a list of (figure/table,number,caption) items
 def extract_figures_and_captions(text: str) -> List[Dict]:
-    """
-    Extract figure and table captions.
-    """
     figures = []
     
     # Figure/Table caption patterns
@@ -316,26 +235,17 @@ def extract_figures_and_captions(text: str) -> List[Dict]:
     for pattern in patterns:
         for match in re.finditer(pattern, text, re.IGNORECASE):
             fig_type = 'figure' if 'fig' in match.group(0).lower() else 'table'
-            figures.append({
-                'type': fig_type,
-                'number': match.group(1),
-                'caption': match.group(2).strip(),
-            })
+            figures.append({'type': fig_type,'number': match.group(1),'caption': match.group(2).strip(), })
     
     return figures
 
 
+# Extracts references from the papers
 def extract_references(text: str) -> List[str]:
-    """
-    Extract reference entries from the document.
-    """
     references = []
     
-    # Find the references section
     ref_start = None
-    patterns = [
-        r'(?:^|\n)\s*(?:REFERENCES|References|BIBLIOGRAPHY|Bibliography)\s*(?:\n|$)',
-    ]
+    patterns = [r'(?:^|\n)\s*(?:REFERENCES|References|BIBLIOGRAPHY|Bibliography)\s*(?:\n|$)',]
     
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -354,53 +264,39 @@ def extract_references(text: str) -> List[str]:
         
         for pattern in ref_patterns:
             for match in re.finditer(pattern, ref_text, re.MULTILINE):
-                references.append({
-                    'number': match.group(1),
-                    'text': match.group(2).strip()
-                })
+                references.append({'number': match.group(1),'text': match.group(2).strip()})
     
     return references
 
 
-# =============================================================================
-# IMPROVED TEXT CLEANING
-# =============================================================================
-
+# Cleaning the extracted text - preserving latex patterns, removing headers/footers, etc.
 def clean_text_enhanced(text: str, preserve_structure: bool = True) -> str:
-    """
-    Enhanced text cleaning that preserves important formatting.
-    """
     if not text:
         return ""
-    
-    # Preserve LaTeX patterns first
+
     text = preserve_latex_patterns(text)
     
-    # Remove header/footer artifacts (page numbers, running headers)
-    text = re.sub(r'^[\d\s]+$', '', text, flags=re.MULTILINE)  # standalone page numbers
-    
-    # Fix common OCR/extraction issues
-    text = re.sub(r'(?<=[a-z])-\s*\n\s*(?=[a-z])', '', text)  # hyphenation at line breaks
+    text = re.sub(r'^[\d\s]+$', '', text, flags=re.MULTILINE)  
+    text = re.sub(r'(?<=[A-Za-z])-\s*\n\s*(?=[A-Za-z])', '', text)
     
     if preserve_structure:
-        # Normalize multiple newlines but keep paragraph structure
         text = re.sub(r'\n{3,}', '\n\n', text)
-        # Normalize spaces within lines
         text = re.sub(r'[ \t]+', ' ', text)
     else:
-        # Collapse all whitespace for dense representation
         text = re.sub(r'\s+', ' ', text)
     
-    # Clean up arXiv-style header artifacts
     text = re.sub(r'ar\s*X\s*iv\s*:\s*[\d.]+v?\d*\s*\[[^\]]+\]\s*\d+\s*\w+\s*\d+', '', text)
-    
+    # Insert space between lowercase-uppercase transitions
+    text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
+    # Insert space between letter-number transitions
+    text = re.sub(r'([A-Za-z])(\d)', r'\1 \2', text)
+    text = re.sub(r'(\d)([A-Za-z])', r'\1 \2', text)
+
     return text.strip()
 
 
+# Extract the abstract from the document - returns an extracted and cleaned abstract only if the abstract is greater than 50 characters
 def extract_abstract(text: str) -> Optional[str]:
-    """
-    Extract the abstract from the document.
-    """
     patterns = [
         r'(?:ABSTRACT|Abstract)\s*[:\-]?\s*(.*?)(?=\n\s*(?:I\.?\s+)?(?:INTRODUCTION|Introduction|Keywords|KEYWORDS|1\.\s+Introduction))',
         r'(?:ABSTRACT|Abstract)\s*[:\-]?\s*(.*?)(?=\n\n)',
@@ -410,46 +306,33 @@ def extract_abstract(text: str) -> Optional[str]:
         match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
         if match:
             abstract = match.group(1).strip()
-            # Clean up the abstract
             abstract = re.sub(r'\s+', ' ', abstract)
-            if len(abstract) > 50:  # Reasonable abstract length
+            if len(abstract) > 50:  
                 return abstract
     
     return None
 
 
-# =============================================================================
-# MAIN EXTRACTION WITH XML OUTPUT
-# =============================================================================
-
+# Parses a file using Apache Tika and returns both plain text and XML representations along with metadata
 def extract_with_xml(filepath: str) -> Tuple[str, str, Dict]:
-    """
-    Extract content using Tika's XML output for better structure preservation.
-    """
-    # Get XML/HTML output for structure
     parsed_xml = parser.from_file(filepath, xmlContent=True)
     xml_content = parsed_xml.get("content", "")
-    
-    # Get plain text for reading
     parsed_text = parser.from_file(filepath)
     text_content = parsed_text.get("content", "")
     metadata = parsed_text.get("metadata", {})
-    
     return text_content, xml_content, metadata
 
 
+# Processes a single pdf - extracts contents, structured elements, etc. and cleans them
+# This is the bigger helper function which calls all the other smaller helper functions
 def process_pdf(filepath: str, filename: str) -> Dict:
-    """
-    Process a single PDF with enhanced extraction.
-    """
     paper_id = filename.replace(".pdf", "")
     
     try:
         # Extract content
         text_content, xml_content, metadata = extract_with_xml(filepath)
-        
-        # Clean text while preserving structure
-        clean_full_text = clean_text_enhanced(text_content, preserve_structure=True)
+        raw_text = get_best_text(text_content, xml_content)
+        clean_full_text = clean_text_enhanced(raw_text, preserve_structure=True)
         clean_dense_text = clean_text_enhanced(text_content, preserve_structure=False)
         
         # Extract structured elements
@@ -461,10 +344,9 @@ def process_pdf(filepath: str, filename: str) -> Dict:
         references = extract_references(clean_full_text)
         abstract = extract_abstract(clean_full_text)
         
-        # Combine tables from both sources
         all_tables = tables_from_xml if tables_from_xml else tables_from_text
         
-        # Build comprehensive record
+        # Build a record for the JSONL file
         record = {
             # Alignment keys
             "paper_id": paper_id,
@@ -472,7 +354,7 @@ def process_pdf(filepath: str, filename: str) -> Dict:
             
             # Text content
             "full_text": clean_full_text,
-            "dense_text": clean_dense_text,  # Single-line version for embeddings
+            "dense_text": clean_dense_text,  
             "abstract": abstract,
             
             # Structured elements
@@ -511,40 +393,26 @@ def process_pdf(filepath: str, filename: str) -> Dict:
         return record
         
     except Exception as e:
-        return {
-            "paper_id": paper_id,
-            "file_name": filename,
-            "error": str(e),
-            "extraction_quality": "failed"
-        }
+        return {"paper_id": paper_id,"file_name": filename,"error": str(e),"extraction_quality": "failed"}
 
 
-# =============================================================================
-# MAIN EXECUTION
-# =============================================================================
-
+# NOTE: Since we are focusing on pdfs right now, the main function only considers pdf files from the unstructured data directory
+# This can be changed in case of new formats of unstructured data
 def main():
-    """Main extraction loop."""
     print("=" * 60)
-    print("Enhanced Tika PDF Extraction")
+    print("Tika extraction of the unstructured data:\n")
     print("=" * 60)
     
     pdf_files = [f for f in os.listdir(UNSTRUCTURED_DIR) if f.lower().endswith('.pdf')]
     print(f"Found {len(pdf_files)} PDF files to process\n")
     
-    stats = {
-        'total': len(pdf_files),
-        'success': 0,
-        'failed': 0,
-        'with_tables': 0,
-        'with_equations': 0,
-    }
+    stats = {'total': len(pdf_files),'success': 0,'failed': 0,'with_tables': 0,'with_equations': 0,}
     
+    # Processing each file in the directory by extracting data, cleaning it, and storing it in the output file
     with open(OUTPUT_FILE, "w", encoding="utf-8") as out:
         for i, filename in enumerate(pdf_files, 1):
             filepath = os.path.join(UNSTRUCTURED_DIR, filename)
             print(f"[{i}/{len(pdf_files)}] Processing: {filename}")
-            
             record = process_pdf(filepath, filename)
             
             if 'error' not in record:
@@ -553,17 +421,17 @@ def main():
                     stats['with_tables'] += 1
                 if record.get('has_math'):
                     stats['with_equations'] += 1
-                print(f"  ✓ Tables: {record['num_tables']}, Equations: {record['num_equations']}, "
+                print(f" Tables: {record['num_tables']}, Equations: {record['num_equations']}, "
                       f"Sections: {record['num_sections']}, Words: {record['word_count']}")
             else:
                 stats['failed'] += 1
-                print(f"  ✗ Error: {record['error']}")
+                print(f"Error: {record['error']}")
             
             out.write(json.dumps(record, ensure_ascii=False) + "\n")
     
     print("\n" + "=" * 60)
-    print("Extraction Complete!")
-    print("=" * 60)
+    print("Extraction Complete")
+    print("=" * 60 + "\n")
     print(f"Total PDFs:      {stats['total']}")
     print(f"Successful:      {stats['success']}")
     print(f"Failed:          {stats['failed']}")
