@@ -7,7 +7,7 @@ import pandas as pd
 import re
 import yake
 from collections import Counter
-from pyspark.sql.functions import when, split, collect_list, concat_ws
+from pyspark.sql.functions import when, split, collect_list, concat_ws, length
 from pyspark.sql.types import ArrayType, StructType, StructField, FloatType
 from pyspark.sql.window import Window
 from pyspark.sql.functions import row_number
@@ -129,48 +129,43 @@ print("Completed basic spark fusion pipeline but without insight extraction")
 
 # Extrancting paper sections using regex patterns
 def extract_sections(text):
-
-    if text is None:
+    if not text or len(text) < 200:
         return []
 
-    # Patterns for section headers (handles "1. Introduction", "INTRODUCTION", "1 Introduction", etc.)
+    # Updated patterns to match arxiv PDF formats:
+    # - Roman numerals (I., II., III., IV., V., VI., etc.) followed by section names
+    # - Arabic numerals (1., 2., 3., etc.) 
+    # - Section names in uppercase or mixed case
+    # - Relaxed boundary matching since PDF extraction may not preserve newlines
+    # - Require section number prefix to avoid false matches in regular text
     section_patterns = [
-        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?abstract[:\s]*\n', "abstract"),
-        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?introduction[:\s]*\n', "introduction"),
-        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:related\s+work|background|literature\s+review)[:\s]*\n', "background"),
-        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:method|methodology|approach|proposed\s+method)[:\s]*\n', "method"),
-        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:experiment|evaluation|results|empirical)[:\s]*\n', "results"),
-        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:discussion)[:\s]*\n', "discussion"),
-        (r'(?i)(?:^|\n)\s*(?:\d+\.?\s*)?(?:conclusion|concluding\s+remarks|summary)[:\s]*\n', "conclusion"),
+        (r'(?i)(?:^|\s)(?:[IVX]+|[0-9]+)\.?\s+abstract(?:\s|$)', "abstract"),
+        (r'(?i)(?:^|\s)(?:[IVX]+|[0-9]+)\.?\s+introduction(?:\s|$)', "introduction"),
+        (r'(?i)(?:^|\s)(?:[IVX]+|[0-9]+)\.?\s+(?:related\s+work|background|preliminary|preliminaries)(?:\s|$)', "background"),
+        (r'(?i)(?:^|\s)(?:[IVX]+|[0-9]+)\.?\s+(?:method|methodology|approach|model|framework|proposed\s+method)(?:s)?(?:\s|$)', "method"),
+        (r'(?i)(?:^|\s)(?:[IVX]+|[0-9]+)\.?\s+(?:experiment|results|discussion|evaluation)(?:s)?(?:\s|$)', "results"),
+        (r'(?i)(?:^|\s)(?:[IVX]+|[0-9]+)\.?\s+(?:conclusion|conclusions|summary|concluding\s+remarks)(?:\s|$)', "conclusion"),
     ]
-    
-    # Find all section headers and their positions
-    positions = []
-    for pattern, name in section_patterns:
-        match = re.search(pattern, text)
-        if match:
-            positions.append((match.end(), name))
-    
-    # If no sections are found, trying a simple substring search 
-    if not positions:
-        text_l = text.lower()
-        for name in ["abstract", "introduction", "method", "results", "conclusion"]:
-            idx = text_l.find(name)
-            if idx != -1:
-                positions.append((idx, name))
 
-    if not positions:
+    matches = []
+    for pattern, name in section_patterns:
+        for m in re.finditer(pattern, text):
+            matches.append((m.start(), name))
+
+    if not matches:
         return []
 
-    positions.sort()
+    matches.sort()
     sections = []
-    
-    # Extract sections based on found positions, but only consider sections with sufficient length for relevance 
-    for i, (start, name) in enumerate(positions):
-        end = positions[i + 1][0] if i + 1 < len(positions) else min(start + 15000, len(text))
+
+    for i, (start, name) in enumerate(matches):
+        end = matches[i + 1][0] if i + 1 < len(matches) else len(text)
         section_text = text[start:end].strip()
-        if len(section_text) > 50:
-            sections.append({"section_name": name,"section_text": section_text[:15000]})
+        if len(section_text) > 200:
+            sections.append({
+                "section_name": name,
+                "section_text": section_text[:12000]
+            })
 
     return sections
 
@@ -197,41 +192,38 @@ extract_keywords_udf = udf(extract_keywords_yake, keyword_schema)
 
 # Scoring sentences using a simplified TextRank approach and ranking them by their similarity to the overall document
 def score_sentences_textrank(text, top_n=3):
-    if not text or len(text) < 100:
+    if not text or len(text) < 200:
         return []
-    
-    try:
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 30]
-        
-        if not sentences:
-            return []
-        
-        def tokenize(s):
-            return re.findall(r'\b[a-z]{3,}\b', s.lower())
-        
-        # getting document-level word frequencies
-        all_words = []
-        for s in sentences:
-            all_words.extend(tokenize(s))
-        word_freq = Counter(all_words)
-        
-        # scoring sentences based on word frequencies where score = average word frequency (normalized by sentence length)
-        scored = []
-        for sent in sentences:
-            words = tokenize(sent)
-            if not words:
-                continue
-            score = sum(word_freq.get(w, 0) for w in words) / len(words)
-            if 50 < len(sent) < 500:
-                score *= 1.2
-            scored.append({"sentence": sent, "score": float(score)})
-        
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:top_n]
-    
-    except Exception:
-        return []
+
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    scored = []
+
+    def tokenize(s):
+        return re.findall(r'\b[a-z]{3,}\b', s.lower())
+
+    all_words = []
+    for s in sentences:
+        all_words.extend(tokenize(s))
+    word_freq = Counter(all_words)
+
+    for sent in sentences:
+        if len(sent) < 40 or len(sent) > 400:
+            continue
+
+        math_chars = sum(1 for c in sent if c in "=∑∫√±×÷≤≥≈≠^_")
+        letters = sum(1 for c in sent if c.isalpha())
+        if letters == 0 or math_chars / letters > 0.2:
+            continue  # drop math-heavy sentences
+
+        words = tokenize(sent)
+        if not words:
+            continue
+
+        score = sum(word_freq.get(w, 0) for w in words) / len(words)
+        scored.append({"sentence": sent.strip(), "score": float(score)})
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:top_n]
 
 # Creating a UDF for TextRank-style sentence scoring
 sentence_schema = ArrayType(StructType([StructField("sentence", StringType(), True),StructField("score", FloatType(), True)]))
@@ -276,7 +268,15 @@ df_top_sentences.printSchema()
 
 
 # Aggregating high-confidence keywords at the paper level and selecting highest-scoring sentence for each semantic role within a paper
-df_paper_keywords = df_keywords.filter(col("keyword_score") > 0.3).groupBy("original_id", "title").agg(collect_list("keyword").alias("all_keywords"))
+BAD_PHRASES = ["we show", "paper we", "abstract", "introduction"]
+
+df_paper_keywords = (
+    df_keywords
+    .filter(col("keyword_score") > 0.35)
+    .filter(~col("keyword").rlike("|".join(BAD_PHRASES)))
+    .groupBy("original_id", "title")
+    .agg(collect_list("keyword").alias("all_keywords"))
+)
 
 window = Window.partitionBy("original_id", "semantic_role").orderBy(col("sentence_score").desc())
 # df_best_sentences = df_top_sentences.filter(col("semantic_role").isNotNull()).withColumn("rank", row_number().over(window)) \
@@ -284,18 +284,38 @@ window = Window.partitionBy("original_id", "semantic_role").orderBy(col("sentenc
 
 window_section = (Window.partitionBy("original_id", "section_name").orderBy(col("sentence_score").desc()))
 df_top_n_sentences = (df_top_sentences.withColumn("rank", row_number().over(window_section)).filter(col("rank") <= num_sentences))
-df_best_sentences = (df_top_n_sentences.groupBy("original_id", "title", "section_name", "semantic_role").agg(concat_ws(
-            " ",
-            sort_array(
-                collect_list(struct("rank", "key_sentence"))
-            )["key_sentence"]
-        ).alias("section_summary")
+df_best_sentences = (
+    df_top_n_sentences
+    .groupBy("original_id", "title", "section_name", "semantic_role")
+    .agg(concat_ws(
+        " ",
+        sort_array(
+            collect_list(struct("rank", "key_sentence"))
+        )["key_sentence"]
+    ).alias("section_summary"))
+)
+
+# ----------------------------
+# DROP WEAK / HALLUCINATED TAKEAWAYS
+# ----------------------------
+df_best_sentences = df_best_sentences.filter(
+    ~(
+        (col("semantic_role") == "TAKEAWAY") &
+        (length(col("section_summary")) < 150)
     )
 )
 
 # Combining the specific roles into one row for each paper and joining that with the corresponding keywords for that paper
 # df_insights = df_best_sentences.groupBy("original_id").pivot("semantic_role").agg(concat_ws(" ", collect_list("key_sentence")))
 df_insights = (df_best_sentences.groupBy("original_id").pivot("semantic_role").agg(concat_ws(" ", collect_list("section_summary"))))
+df_abstracts = df_final.select(
+    col("original_id"),
+    col("abstract").alias("OVERVIEW")
+)
+# Remove noisy autogenerated overview
+df_insights = df_insights.drop("OVERVIEW")
+# Inject clean abstract-based overview
+df_insights = df_insights.join(df_abstracts, on="original_id", how="left")
 df_paper_insights = df_paper_keywords.join(df_insights, on="original_id", how="left")
 
 print("Paper insights schema:")
