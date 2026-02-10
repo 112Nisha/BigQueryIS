@@ -1,19 +1,15 @@
-*logs/*
-__pycache__/*
-metastore_db/*
-spark_warehouse/*
-
-airflow/airflow.cfg
-airflow/airflow.db
-airflow/logs/
-airflow/plugins/__pycache__/
-
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
 venv/
 .env
 
+# Data & output
 pdfs/*
+.cache/
+output/
+
+# Logs
+*.log

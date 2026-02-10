@@ -1,137 +1,74 @@
-# BigQueryIS
+# Citation Tree Builder
 
-## Set-up
+Build an interactive citation tree from a local PDF.  
+Discovers related papers via **Semantic Scholar**, **arXiv**, and **OpenAlex**, uses ML to explain how each paper improved upon its parent, and renders a self-contained HTML visualization.
+
+## Features
+
+- **PDF extraction** — title, abstract, references, arXiv ID via Apache Tika
+- **Multi-source discovery** — Semantic Scholar, arXiv, OpenAlex
+- **ML-powered explanations** — Flan-T5 generates improvement summaries between parent and child papers
+- **Semantic similarity** — sentence-transformers cosine similarity scores
+- **Interactive HTML output** — dark-themed, searchable, with detail panel
+
+## Setup
+
+```bash
+pip install requests tika
+
+# optional — enables ML explanations & similarity scores
+pip install sentence-transformers transformers numpy
 ```
-pip install tika
-pip install pyspark
-pip install pyarrow
-pip install fastparquet
-pip install apache-airflow
-pip install fitz
-pip install yake
+
+> Tika requires Java 8+ on your system.
+
+## Usage
+
+```bash
+# default: uses pdfs/0704.0001.pdf
+python -m citation_tree
+
+# override with a specific PDF
+python -m citation_tree pdfs/some_paper.pdf
 ```
 
-**Environment Variables**
+Output is written to `output/`:
+- `citation_tree.json` — structured tree data
+- `citation_tree.html` — interactive visualization (auto-opens in browser)
+
+## Configuration
+
+Edit `citation_tree/config.py`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `INPUT_PDF` | `pdfs/0704.0001.pdf` | Default input PDF |
+| `MAX_DEPTH` | `2` | How deep the tree expands |
+| `MAX_PAPERS` | `20` | Cap on total papers discovered |
+| `MIN_RELEVANCE` | `0.15` | Score threshold for including a paper |
+
+## Project Structure
+
 ```
-export AIRFLOW_HOME=<path/to/dir/airflow> # note the airflow dir
+citation_tree/            # main package
+    __init__.py
+    __main__.py           # python -m citation_tree entry point
+    main.py               # CLI orchestration
+    config.py             # paths, API URLs, tuning parameters
+    models.py             # Paper & CitationTree dataclasses
+    cache.py              # disk cache + rate limiter
+    text_utils.py         # keyword extraction, title matching
+    ml.py                 # similarity & improvement explanations
+    pdf.py                # Tika-based PDF extraction
+    builder.py            # tree construction orchestrator
+    renderer.py           # HTML/JS visualization output
+    clients/              # API client sub-package
+        __init__.py
+        base.py           # shared caching/rate-limit base class
+        arxiv.py          # arXiv API
+        semantic_scholar.py  # Semantic Scholar API
+        openalex.py       # OpenAlex API
+pdfs/                     # input PDFs (gitignored)
+output/                   # generated JSON + HTML (gitignored)
+.cache/                   # API response cache (gitignored)
 ```
-
-## Order to run the files in:
-
-1. getData
-2. convertData
-3. 
-
-## Running Airflow
-```
-airflow db reset -y
-airflow standalone
-```
-Now for the username and pwd, check the airflow directory on home (or wherever you installed airflow) and run
-`/airflow/simple_auth_manager_passwords.json.generated`
-
-## Dataset
-[Yelp Dataset](https://business.yelp.com/data/resources/open-dataset/)
-
-# Tika:
-
-## 1. tika_extract_enhanced.py – Enhanced Tika-Only
-
-This improves on the original with:
-
-- **Table Detection**  
-  Detects tables from both text patterns and XML output
-
-- **Math Equation Extraction**  
-  Identifies numbered equations, LaTeX patterns, and mathematical symbols  
-  (∑, ∫, ∂, Greek letters, etc.)
-
-- **LaTeX Preservation**  
-  Converts LaTeX commands to Unicode  
-  - `\alpha` → `α`  
-  - `\frac{a}{b}` → `((a)/(b))`
-
-- **Section Extraction**  
-  Identifies document structure  
-  (Abstract, Introduction, Methods, etc.)
-
-- **Figure / Caption Detection**  
-  Extracts captions such as:  
-  - `Figure 1:`  
-  - `Table 2:`
-
-- **Reference Extraction**  
-  Parses the References / Bibliography section
-
-- **Improved Text Cleaning**  
-  - Fixes hyphenation  
-  - Removes arXiv artifacts  
-  - Preserves paragraph structure
-
-
-## 2. tika_extract_advanced.py – PyMuPDF + Tika Hybrid - CAN REMOVE
-
-This provides superior extraction using PyMuPDF:
-
-- **Better Table Detection**  
-  Uses PyMuPDF's built-in `find_tables()` plus position-based detection
-
-- **Font-Based Math Detection**  
-  Identifies math content by detecting mathematical fonts  
-  (CMSY, CMMI, Symbol)
-
-- **Structured Block Extraction**  
-  Preserves document layout with bounding boxes
-
-- **Markdown Table Output**  
-  Auto-converts tables to Markdown format
-
-- **Confidence Scoring**  
-  Rates how likely extracted equations are real math
-
-
-# Spark
-
-## 1. YAKE Keyword Extraction (replaces TF-IDF word count)
-
-- Extracts meaningful keyphrases (up to 3-grams)  
-  Examples:  
-  - "neural network architecture"  
-  - "transfer learning"
-- Lightweight, no GPU needed
-- Much more informative than single word counts
-
-## 2. TextRank-style Sentence Scoring
-
-- Scores sentences by how well they represent the document's content
-- Considers word frequency importance across the full text
-- Penalizes too-short or too-long sentences
-- Returns top 3 sentences per section instead of just 1
-
-
-## 3. Better Section Detection
-
-- Uses regex patterns to handle various heading formats  
-  (1. Introduction, INTRODUCTION, etc.)
-- Detects more section types:  
-  - background  
-  - discussion  
-  - related work
-
-## 4. Richer Semantic Roles
-
-- **OVERVIEW (abstract)** – What the paper is about  
-- **MOTIVATION (introduction)** – Why this work matters  
-- **CONTEXT (background)** – What's been done before  
-- **APPROACH (methods)** – How they did it  
-- **FINDINGS (results)** – What they found  
-- **TAKEAWAY (conclusion)** – Key conclusions
-
-
-## 5. Three Output Files
-
-| Output | Description |
-|------|-------------|
-| `output/paper_keywords/` | All keywords per section with scores |
-| `output/paper_sentences/` | Top sentences per section |
-| `output/paper_insights/` | Paper-level summary with best sentence per role + all keywords |
