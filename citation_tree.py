@@ -1309,8 +1309,39 @@ class TempArgs:
     no_download = False  
     no_details = False    
     min_relevance = 0.50     
-    direction = "citations"
+    direction = "both"
     export = False 
+
+import json
+from collections import defaultdict
+
+def print_citation_tree(json_path):
+    with open(json_path, "r") as f:
+        data = json.load(f)
+
+    papers = data["papers"]
+    root_id = data["root"]["id"]
+
+    # Build lookup tables
+    id_to_paper = {p["id"]: p for p in papers}
+    children = defaultdict(list)
+
+    for paper in papers:
+        parent_id = paper.get("parent_id")
+        if parent_id:
+            children[parent_id].append(paper["id"])
+
+    def dfs(paper_id, indent=0):
+        paper = id_to_paper[paper_id]
+        prefix = "│   " * indent + ("├── " if indent > 0 else "")
+        print(f"{prefix}{paper['title']} ({paper['year']})")
+
+        for i, child_id in enumerate(children.get(paper_id, [])):
+            dfs(child_id, indent + 1)
+
+    print("\n📚 Citation Tree\n")
+    dfs(root_id)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1331,7 +1362,7 @@ Examples:
     parser.add_argument("--export", type=str, help="Export JSON path")
     parser.add_argument("--min-relevance", type=float, default=0.1, help="Min relevance (default: 0.1)")
     
-    pdf_path = "/home/dell/BigQueryIS/pdfs/0704.0001.pdf"
+    pdf_path = "/home/dell/BigQueryIS/pdfs/0704.0005.pdf"
     
     if not os.path.exists(pdf_path):
         print(f"❌ File not found: {pdf_path}")
@@ -1353,11 +1384,12 @@ Examples:
     TreeVisualizer.print_stats(tree)
     
     # Export
-    export_path = args.export or os.path.join(BASE_DIR, "citation_tree_v2_output.json")
+    export_path = args.export or os.path.join(BASE_DIR, "citation_tree_output.json")
     TreeVisualizer.export_json(tree, export_path)
     
     print("\n✅ Done!")
     print(f"📁 Downloaded papers: {TREE_PDFS_DIR}")
+    print_citation_tree("citation_tree_output.json")
 
 
 if __name__ == "__main__":
