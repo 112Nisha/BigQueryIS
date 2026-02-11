@@ -117,7 +117,7 @@ class TreeBuilder:
 
         related: List[Paper] = []
 
-        # Fetch refs/cites from whichever API sourced this paper
+        # Fetch references (what this paper cites) from whichever API sourced it
         for prefix, label, client in (
             ("s2:", "S2", self.s2),
             ("oa:", "OA", self.oa),
@@ -125,12 +125,31 @@ class TreeBuilder:
             if paper.id.startswith(prefix):
                 api_id = paper.id[len(prefix):]
                 refs = client.get_references(api_id, limit=20)
-                cites = client.get_citations(api_id, limit=20)
-                print(
-                    f"{indent}  {label}: {len(refs)} refs, {len(cites)} cites"
-                )
+                print(f"{indent}  {label}: {len(refs)} refs")
                 related.extend(refs)
-                related.extend(cites)
+
+        # For arxiv/local papers, try to get refs via S2 using arxiv_id or title search
+        if paper.id.startswith(("arxiv:", "local:")) and not related:
+            # Try S2 by arxiv_id first
+            if paper.arxiv_id:
+                s2_paper = self.s2.get_by_arxiv(paper.arxiv_id)
+                if s2_paper:
+                    s2_id = s2_paper.id[3:]  # strip "s2:"
+                    refs = self.s2.get_references(s2_id, limit=20)
+                    print(f"{indent}  S2 (via arXiv): {len(refs)} refs")
+                    related.extend(refs)
+            # Fall back to title search in S2/OA
+            if not related and paper.title:
+                for label, client in (("S2", self.s2), ("OA", self.oa)):
+                    for found in client.search(paper.title, limit=3):
+                        if titles_match(paper.title, found.title):
+                            api_id = found.id.split(":", 1)[1]
+                            refs = client.get_references(api_id, limit=20)
+                            print(f"{indent}  {label} (via search): {len(refs)} refs")
+                            related.extend(refs)
+                            break
+                    if related:
+                        break
 
         # arXiv keyword search
         if paper.title:
