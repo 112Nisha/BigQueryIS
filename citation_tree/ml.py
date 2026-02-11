@@ -161,8 +161,10 @@ def _ensure_complete_sentences(text: str) -> str:
 
 
 def generate_improvement_explanation(parent: Paper, child: Paper) -> str:
-    """Explain how *child* improves upon *parent*.
+    """Explain how *parent* (the citing paper) builds upon *child* (the reference).
 
+    In the citation tree, the parent is the paper being analyzed (newer work),
+    and children are the references it cites (older foundational work).
     Uses Flan-T5 when available, otherwise falls back to keyword-diff heuristic.
     """
     gen = _get_generator()
@@ -173,10 +175,10 @@ def generate_improvement_explanation(parent: Paper, child: Paper) -> str:
     if gen is not None:
         model, tokenizer = gen
         prompt = (
-            f"Compare two research papers and explain the improvement.\n\n"
-            f"PAPER 1: {parent_desc}\n\n"
-            f"PAPER 2: {child_desc}\n\n"
-            f"Complete this sentence: 'Paper 2 improves on Paper 1 by'"
+            f"Compare two research papers. Paper 1 is a newer paper that cites Paper 2.\n\n"
+            f"PAPER 1 (newer, citing paper): {parent_desc}\n\n"
+            f"PAPER 2 (older, referenced paper): {child_desc}\n\n"
+            f"Complete this sentence: 'The citing paper builds on this reference by'"
         )
         try:
             inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
@@ -193,8 +195,8 @@ def generate_improvement_explanation(parent: Paper, child: Paper) -> str:
             # Check if response is good quality
             if not _is_poor_quality_response(result, parent_desc, child_desc):
                 # Format nicely and ensure complete sentence
-                if not result.lower().startswith('paper 2'):
-                    result = f"This paper improves on the parent by {result.lower()}"
+                if not result.lower().startswith('the citing'):
+                    result = f"The parent paper builds on this reference by {result.lower()}"
                 result = _ensure_complete_sentences(result)
                 return result
         except Exception:
@@ -203,31 +205,31 @@ def generate_improvement_explanation(parent: Paper, child: Paper) -> str:
     # Heuristic fallback - generate a structured comparison
     parent_kw = important_words(parent_desc)
     child_kw = important_words(child_desc)
-    new_concepts = child_kw - parent_kw
+    new_in_parent = parent_kw - child_kw
     common_concepts = parent_kw & child_kw
-    removed_concepts = parent_kw - child_kw
+    unique_to_ref = child_kw - parent_kw
     
-    if new_concepts and common_concepts:
+    if common_concepts and new_in_parent:
         common_sample = ", ".join(sorted(common_concepts)[:3])
-        new_sample = ", ".join(sorted(new_concepts)[:4])
+        new_sample = ", ".join(sorted(new_in_parent)[:4])
         return (
-            f"The parent paper focuses on {common_sample}. "
-            f"This paper improves on it by introducing {new_sample}, "
+            f"This reference provides foundational work on {common_sample}. "
+            f"The parent paper builds on it by introducing {new_sample}, "
             f"extending the research with new methods and analysis."
         )
-    elif new_concepts:
-        new_sample = ", ".join(sorted(new_concepts)[:5])
+    elif unique_to_ref:
+        ref_sample = ", ".join(sorted(unique_to_ref)[:5])
         return (
-            f"This paper improves on the parent by introducing new concepts: {new_sample}."
+            f"This reference contributes foundational concepts: {ref_sample}. "
+            f"The parent paper builds upon these ideas in its research."
         )
-    elif removed_concepts:
-        removed_sample = ", ".join(sorted(removed_concepts)[:3])
+    elif new_in_parent:
+        new_sample = ", ".join(sorted(new_in_parent)[:5])
         return (
-            f"This paper takes a different approach by focusing less on {removed_sample} "
-            f"and exploring alternative methods in a related direction."
+            f"The parent paper extends this reference by introducing: {new_sample}."
         )
     else:
         return (
-            f"This paper extends the parent work with refined methodology "
-            f"and deeper analysis in a closely related research area."
+            f"This reference provides foundational work that the parent paper "
+            f"extends with refined methodology and deeper analysis."
         )
