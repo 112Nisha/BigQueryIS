@@ -30,13 +30,33 @@ class Paper:
     improvement: str = ""
     similarity_to_parent: float = 0.0
 
+    @staticmethod
+    def _clean_latex(text: str) -> str:
+        """Remove LaTeX math symbols from text."""
+        import re
+        if not text:
+            return text
+        text = re.sub(r'\$\$[^$]*\$\$', '', text)
+        text = re.sub(r'\$[^$]+\$', '', text)
+        text = re.sub(r'\\\([^)]*\\\)', '', text)
+        text = re.sub(r'\\\[[^\]]*\\\]', '', text)
+        text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', text)
+        text = re.sub(r'\\[a-zA-Z]+', '', text)
+        text = re.sub(r'[{}\\]', '', text)
+        text = re.sub(r'[_^]+', '', text)
+        text = re.sub(r'\s*-?\d+pt\s*', '', text)
+        text = re.sub(r'\bdocument\b', '', text)
+        text = re.sub(r'\bminimal\b', '', text)
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
-            "title": self.title,
+            "title": self._clean_latex(self.title),
             "authors": self.authors,
             "year": self.year,
-            "abstract": (self.abstract or "")[:500],
+            "abstract": self._clean_latex((self.abstract or "")[:500]),
             "venue": self.venue,
             "citations_count": self.citations_count,
             "arxiv_id": self.arxiv_id,
@@ -49,7 +69,7 @@ class Paper:
             "parent_id": self.parent_id,
             "relation_type": self.relation_type,
             "relevance_score": round(self.relevance_score, 3),
-            "improvement": self.improvement,
+            "improvement": self._clean_latex(self.improvement),
             "similarity_to_parent": round(self.similarity_to_parent, 3),
         }
 
