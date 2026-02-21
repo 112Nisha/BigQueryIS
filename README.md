@@ -18,6 +18,10 @@ pip install requests tika
 
 # optional — enables ML explanations & similarity scores
 pip install sentence-transformers transformers numpy
+
+export GEMINI_API_KEY="your-key-here"
+
+pip install google-generativeai
 ```
 
 > Tika requires Java 8+ on your system.

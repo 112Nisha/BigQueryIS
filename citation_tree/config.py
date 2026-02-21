@@ -25,3 +25,7 @@ MIN_RELEVANCE = 0.15
 
 # Rate-limiting (seconds between requests)
 RATE_LIMIT = 1.2
+
+# Google Gemini API (free tier — used for improvement explanations in ml.py)
+# Get a free key at https://aistudio.google.com/app/apikey
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "") or "AIzaSyA4hTo5DeRGRG6_yUsVF9VMDRdCSj1M2oQ"

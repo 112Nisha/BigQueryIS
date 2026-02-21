@@ -54,6 +54,7 @@ class TreeBuilder:
             id=f"local:{hashlib.md5(title.encode()).hexdigest()[:12]}",
             title=title,
             abstract=info["abstract"],
+            full_text=info["text"],
             arxiv_id=arxiv_id,
             source="local",
         )
@@ -128,6 +129,23 @@ class TreeBuilder:
                 print(f"{indent}  {label}: {len(refs)} refs")
                 related.extend(refs)
 
+        # Cross-source fallback: if the primary API returned nothing, try the other
+        if not related:
+            for prefix, label, client in (
+                ("s2:", "OA", self.oa),
+                ("oa:", "S2", self.s2),
+            ):
+                if paper.id.startswith(prefix) and paper.title:
+                    for found in client.search(paper.title, limit=3):
+                        if titles_match(paper.title, found.title):
+                            api_id = found.id.split(":", 1)[1]
+                            refs = client.get_references(api_id, limit=20)
+                            print(f"{indent}  {label} (cross-source): {len(refs)} refs")
+                            related.extend(refs)
+                            break
+                    if related:
+                        break
+
         # For arxiv/local papers, try to get refs via S2 using arxiv_id or title search
         if paper.id.startswith(("arxiv:", "local:")) and not related:
             # Try S2 by arxiv_id first
@@ -175,16 +193,27 @@ class TreeBuilder:
         filtered: list[tuple[Paper, float]] = []
         for p, sc in scored:
             th = title_hash(p.title)
+            # Guard: skip if already visited, same title hash, same as
+            # the paper being expanded, or same as the tree root.
             if (
                 p.id not in self.visited
                 and th not in self.title_hashes
                 and sc >= self.min_rel
+                and not self._is_same_paper(paper, p)
+                and not self._is_same_paper(tree.root, p)
             ):
                 filtered.append((p, sc))
                 self.visited.add(p.id)
                 self.title_hashes.add(th)
         filtered.sort(key=lambda x: -x[1])
         to_add = filtered[: min(8, self.max_papers - len(tree.papers))]
+
+        if not to_add and related:
+            best = max((sc for _, sc in scored), default=0)
+            print(
+                f"{indent}  ⚠ {len(related)} candidates scored, "
+                f"best={best:.3f}, threshold={self.min_rel} — none passed"
+            )
 
         for child, sc in to_add:
             child.depth = paper.depth + 1
@@ -197,12 +226,34 @@ class TreeBuilder:
             if len(tree.papers) < self.max_papers:
                 self._expand(tree, child)
 
+    @staticmethod
+    def _is_same_paper(a: Paper, b: Paper) -> bool:
+        """Return True if *a* and *b* are the same paper (self-citation guard)."""
+        # Same internal ID
+        if a.id == b.id:
+            return True
+        # Same arXiv ID
+        if a.arxiv_id and b.arxiv_id and a.arxiv_id == b.arxiv_id:
+            return True
+        # Same DOI
+        if a.doi and b.doi and a.doi.lower() == b.doi.lower():
+            return True
+        # Near-identical titles (very strict threshold)
+        wa, wb = important_words(a.title), important_words(b.title)
+        if wa and wb:
+            overlap = len(wa & wb) / max(1, min(len(wa), len(wb)))
+            if overlap > 0.85:
+                return True
+        return False
+
     def _score(
         self, source: Paper, candidates: List[Paper]
     ) -> List[Tuple[Paper, float]]:
         src_words = important_words(
             source.title + " " + (source.abstract or "")
         )
+        # Use only title words for a fairer overlap comparison
+        src_title_words = important_words(source.title)
         src_cats = set(source.categories)
         results: list[tuple[Paper, float]] = []
         for p in candidates:
@@ -210,17 +261,29 @@ class TreeBuilder:
                 continue
             sc = 0.0
             pw = important_words(p.title + " " + (p.abstract or ""))
+            p_title_words = important_words(p.title)
             if pw and src_words:
-                sc += len(src_words & pw) / max(1, len(src_words | pw)) * 0.4
+                # Use overlap coefficient (intersection / min set size)
+                # instead of Jaccard to avoid penalising long abstracts
+                overlap = len(src_words & pw) / max(1, min(len(src_words), len(pw)))
+                sc += overlap * 0.35
+                # Bonus for title-word overlap (more indicative of topical match)
+                if src_title_words and p_title_words:
+                    title_overlap = len(src_title_words & p_title_words) / max(
+                        1, min(len(src_title_words), len(p_title_words))
+                    )
+                    sc += title_overlap * 0.15
             if p.categories and src_cats:
                 sc += (
                     len(src_cats & set(p.categories))
                     / max(1, len(src_cats))
-                    * 0.3
+                    * 0.2
                 )
             if p.citations_count:
-                sc += min(p.citations_count / 500, 0.2)
+                sc += min(p.citations_count / 500, 0.15)
             if p.relation_type in ("reference", "citation"):
-                sc += 0.1
+                sc += 0.15
+            elif p.relation_type == "related":
+                sc += 0.05
             results.append((p, sc))
         return results

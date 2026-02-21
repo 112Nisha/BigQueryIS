@@ -27,6 +27,7 @@ class Paper:
     parent_id: Optional[str] = None
     relevance_score: float = 0.0
     relation_type: str = "unknown"
+    full_text: Optional[str] = None
     improvement: str = ""
     similarity_to_parent: float = 0.0
 

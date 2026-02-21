@@ -42,7 +42,9 @@ class BaseClient:
             result = fetch()
             if multi:
                 papers = result or []
-                self.cache.set(key, [self._from_paper(p) for p in papers])
+                # Only cache non-empty results to avoid persisting transient failures
+                if papers:
+                    self.cache.set(key, [self._from_paper(p) for p in papers])
                 return papers
             if result:
                 self.cache.set(key, self._from_paper(result))

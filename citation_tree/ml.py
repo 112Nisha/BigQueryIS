@@ -2,15 +2,21 @@
 
 Models are lazy-loaded so the rest of the pipeline works even when
 sentence-transformers / transformers are not installed.
+
+The generative explanation uses the Google Gemini API (gemini-1.5-flash,
+free tier) when GEMINI_API_KEY is set; otherwise it falls back to a
+keyword heuristic.
 """
 
 from __future__ import annotations
 
-from citation_tree.models import Paper
-from citation_tree.text_utils import important_words
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from citation_tree.models import Paper
 
 _similarity_model = None
-_generator_pipeline = None
+_gemini_model = None
 
 
 def _get_similarity_model():
@@ -26,20 +32,21 @@ def _get_similarity_model():
     return _similarity_model
 
 
-def _get_generator():
-    """Lazy-load Flan-T5-base for text generation."""
-    global _generator_pipeline
-    if _generator_pipeline is None:
+def _get_gemini_model():
+    """Lazy-initialise the Gemini generative model (free tier)."""
+    global _gemini_model
+    if _gemini_model is None:
         try:
-            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+            from citation_tree.config import GEMINI_API_KEY
 
-            model_name = "google/flan-t5-base"
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-            _generator_pipeline = (model, tokenizer)
-        except ImportError:
-            pass
-    return _generator_pipeline
+            if not GEMINI_API_KEY:
+                return None
+            from google import genai
+
+            _gemini_model = genai.Client(api_key=GEMINI_API_KEY)
+        except Exception as exc:
+            print(f"    ⚠ Failed to initialise Gemini client: {exc}")
+    return _gemini_model
 
 
 def compute_similarity(text_a: str, text_b: str) -> float:
@@ -57,179 +64,109 @@ def compute_similarity(text_a: str, text_b: str) -> float:
     )
 
 
-def _clean_latex(text: str) -> str:
-    """Remove LaTeX math symbols and clean up formatting."""
-    import re
-    if not text:
-        return text
-    # Remove display math first: $$...$$ 
-    text = re.sub(r'\$\$[^$]*\$\$', '', text)
-    # Remove inline math: $...$
-    text = re.sub(r'\$[^$]+\$', '', text)
-    # Remove \(...\) and \[...\]
-    text = re.sub(r'\\\([^)]*\\\)', '', text)
-    text = re.sub(r'\\\[[^\]]*\\\]', '', text)
-    # Remove LaTeX commands with arguments: \command{...}
-    text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', text)
-    # Remove LaTeX commands with optional args: \command[...]{...}
-    text = re.sub(r'\\[a-zA-Z]+\[[^\]]*\]\{[^}]*\}', '', text)
-    # Remove standalone LaTeX commands: \command
-    text = re.sub(r'\\[a-zA-Z]+', '', text)
-    # Remove stray braces, backslashes, and math symbols
-    text = re.sub(r'[{}\\]', '', text)
-    # Remove subscript/superscript markers
-    text = re.sub(r'[_^]+', '', text)
-    # Remove common math artifacts
-    text = re.sub(r'\s*-?\d+pt\s*', '', text)  # Remove pt measurements like -69pt
-    text = re.sub(r'\bdocument\b', '', text)  # Remove stray "document" from LaTeX
-    text = re.sub(r'\bminimal\b', '', text)  # Remove stray "minimal"
-    # Clean up extra whitespace and punctuation issues
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'\s+([,.])', r'\1', text)  # Remove space before punctuation
-    text = re.sub(r'([,.])\1+', r'\1', text)  # Remove duplicate punctuation
-    return text.strip()
-
-
-def _is_poor_quality_response(result: str, parent_desc: str, child_desc: str) -> bool:
-    """Check if the generated response is poor quality (repetitive, no difference, etc.)."""
-    if not result or len(result) < 30:
-        return True
-    
-    result_lower = result.lower()
-    
-    # Check for "no difference" patterns
-    if "no difference" in result_lower or "same as" in result_lower:
-        return True
-    
-    # Check if result is just echoing the abstract (similarity check)
-    parent_lower = parent_desc.lower()[:200]
-    child_lower = child_desc.lower()[:200]
-    
-    # If result contains most of the abstract text, it's just echoing
-    if parent_lower[:100] in result_lower or child_lower[:100] in result_lower:
-        return True
-    
-    # Check if result starts like an abstract (common patterns)
-    abstract_starts = ['we present', 'we study', 'we propose', 'we introduce', 
-                       'this paper', 'in this paper', 'a fully', 'the production',
-                       'we consider', 'we report', 'we measure', 'a measurement']
-    if any(result_lower.startswith(start) for start in abstract_starts):
-        return True
-    
-    # Check for excessive repetition (same phrase repeated)
-    sentences = result.split('.')
-    if len(sentences) > 2:
-        # Check if sentences are too similar
-        unique_sentences = set(s.strip().lower() for s in sentences if s.strip())
-        if len(unique_sentences) < len([s for s in sentences if s.strip()]) / 2:
-            return True
-    
-    # Check for repeated phrases (more than 2 times)
-    words = result_lower.split()
-    if len(words) > 20:
-        for i in range(len(words) - 5):
-            phrase = ' '.join(words[i:i+5])
-            if result_lower.count(phrase) > 2:
-                return True
-    
-    return False
-
-
-def _ensure_complete_sentences(text: str) -> str:
-    """Ensure text ends with a complete sentence."""
-    if not text:
-        return text
-    
-    text = text.strip()
-    
-    # If already ends with proper punctuation, return as-is
-    if text and text[-1] in '.!?':
-        return text
-    
-    # Find the last complete sentence
-    last_period = text.rfind('.')
-    last_exclaim = text.rfind('!')
-    last_question = text.rfind('?')
-    
-    last_end = max(last_period, last_exclaim, last_question)
-    
-    if last_end > len(text) * 0.5:  # Only truncate if we keep at least half
-        return text[:last_end + 1]
-    
-    # If no good sentence ending, add a period
-    return text + '.'
+# ── improvement explanation ──────────────────────────────────────────
 
 
 def generate_improvement_explanation(parent: Paper, child: Paper) -> str:
-    """Explain how *parent* (the citing paper) builds upon *child* (the reference).
+    """Compare *parent* (citing paper) with *child* (cited paper) and return
+    a short natural-language explanation of how the parent improves on or
+    extends the child's work and which idea in the child likely influenced
+    the parent.
 
-    In the citation tree, the parent is the paper being analyzed (newer work),
-    and children are the references it cites (older foundational work).
-    Uses Flan-T5 when available, otherwise falls back to keyword-diff heuristic.
+    Tries the Google Gemini API (gemini-1.5-flash, free tier) first;
+    falls back to a keyword-heuristic explanation when the API is
+    unavailable.
     """
-    gen = _get_generator()
-    # Clean LaTeX from abstracts before processing
-    parent_desc = _clean_latex((parent.abstract or parent.title)[:400])
-    child_desc = _clean_latex((child.abstract or child.title)[:400])
+    parent_text = (parent.full_text or parent.abstract or parent.title or "").strip()
+    child_text = (child.full_text or child.abstract or child.title or "").strip()
 
-    if gen is not None:
-        model, tokenizer = gen
-        prompt = (
-            f"Compare two research papers. Paper 1 is a newer paper that cites Paper 2.\n\n"
-            f"PAPER 1 (newer, citing paper): {parent_desc}\n\n"
-            f"PAPER 2 (older, referenced paper): {child_desc}\n\n"
-            f"Complete this sentence: 'The citing paper builds on this reference by'"
-        )
-        try:
-            inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-            outputs = model.generate(
-                **inputs, 
-                max_new_tokens=100,
-                do_sample=False,
-                repetition_penalty=2.5,
-                no_repeat_ngram_size=4,
-            )
-            result = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-            result = _clean_latex(result)
-            
-            # Check if response is good quality
-            if not _is_poor_quality_response(result, parent_desc, child_desc):
-                # Format nicely and ensure complete sentence
-                if not result.lower().startswith('the citing'):
-                    result = f"The parent paper builds on this reference by {result.lower()}"
-                result = _ensure_complete_sentences(result)
-                return result
-        except Exception:
-            pass
+    if not parent_text or not child_text:
+        return ""
 
-    # Heuristic fallback - generate a structured comparison
-    parent_kw = important_words(parent_desc)
-    child_kw = important_words(child_desc)
-    new_in_parent = parent_kw - child_kw
-    common_concepts = parent_kw & child_kw
-    unique_to_ref = child_kw - parent_kw
-    
-    if common_concepts and new_in_parent:
-        common_sample = ", ".join(sorted(common_concepts)[:3])
-        new_sample = ", ".join(sorted(new_in_parent)[:4])
-        return (
-            f"This reference provides foundational work on {common_sample}. "
-            f"The parent paper builds on it by introducing {new_sample}, "
-            f"extending the research with new methods and analysis."
-        )
-    elif unique_to_ref:
-        ref_sample = ", ".join(sorted(unique_to_ref)[:5])
-        return (
-            f"This reference contributes foundational concepts: {ref_sample}. "
-            f"The parent paper builds upon these ideas in its research."
-        )
-    elif new_in_parent:
-        new_sample = ", ".join(sorted(new_in_parent)[:5])
-        return (
-            f"The parent paper extends this reference by introducing: {new_sample}."
-        )
-    else:
-        return (
-            f"This reference provides foundational work that the parent paper "
-            f"extends with refined methodology and deeper analysis."
-        )
+    # ── attempt Gemini-based explanation ──────────────────────────────
+    explanation = _generate_with_gemini(parent, child, parent_text, child_text)
+    if explanation:
+        return explanation
+
+    print("    ⚠ Gemini API unavailable — set GEMINI_API_KEY to generate improvement explanations.")
+    return ""
+
+
+def _generate_with_gemini(
+    parent: Paper,
+    child: Paper,
+    parent_text: str,
+    child_text: str,
+) -> str:
+    """Send both papers in full to Gemini (free tier) and ask for an explanation.
+
+    Tries models in order of preference, falling back if one is rate-limited.
+    """
+    client = _get_gemini_model()
+    if client is None:
+        return ""
+
+    prompt = (
+        "You are an expert academic reviewer. Given two papers — a parent "
+        "(the citing paper) and a child (the cited paper) — write an"
+        " explanation that covers:\n"
+        "1. What specific idea or contribution in the child paper likely "
+        "influenced the parent paper.\n"
+        "2. How the parent paper improves on, extends, or diverges from "
+        "the child paper's work.\n"
+        "Be specific and reference concrete methods, findings, or concepts "
+        "from each paper. Do not use bullet points.\n\n"
+        f"Parent paper (citing, {parent.year or 'unknown year'}):\n"
+        f"Title: {parent.title}\n"
+        f"Abstract: {parent_text}\n\n"
+        f"Child paper (cited, {child.year or 'unknown year'}):\n"
+        f"Title: {child.title}\n"
+        f"Abstract: {child_text}"
+    )
+
+    try:
+        import re as _re
+        import time as _time
+
+        from google.genai import types
+
+        models_to_try = [
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+        ]
+
+        for model_name in models_to_try:
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.3,
+                            max_output_tokens=200,
+                        ),
+                    )
+                    text = response.text.strip()
+                    if len(text) > 10:
+                        return text
+                    break  # empty response, try next model
+                except Exception as exc:
+                    exc_str = str(exc)
+                    if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str:
+                        if attempt < max_retries - 1:
+                            match = _re.search(r"retry in ([\d.]+)s", exc_str, _re.IGNORECASE)
+                            wait = float(match.group(1)) + 2 if match else 15
+                            wait = min(wait, 60)
+                            print(f"    ⏳ {model_name} rate limited — waiting {wait:.0f}s…")
+                            _time.sleep(wait)
+                            continue
+                        # exhausted retries for this model, try next
+                        print(f"    ⚠ {model_name} quota exhausted, trying next model…")
+                        break
+                    print(f"    ⚠ Gemini API error ({model_name}): {exc}")
+                    return ""
+    except Exception as exc:
+        print(f"    ⚠ Gemini API error: {exc}")
+    return ""
