@@ -11,15 +11,27 @@ keyword heuristic.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from openai import OpenAI
+_openai_client = None
 import re as _re
 import time as _time
 from google.genai import types
 from numpy import dot
 from numpy.linalg import norm
 from citation_tree.config import GEMINI_API_KEY
+from citation_tree.cache import RateLimiter
+from citation_tree.config import OPENAI_API_KEY
+from citation_tree.config import GROQ_API_KEY
 
 if TYPE_CHECKING:
     from citation_tree.models import Paper
+
+DEBUG = True
+rate_limiter = RateLimiter(1.2)
+
+def debug(msg):
+    if DEBUG:
+        print(f"[DEBUG] {msg}")
 
 _similarity_model = None
 _gemini_model = None
@@ -37,16 +49,21 @@ def _extract_key_points(client, text_chunk: str) -> str:
         "- Key technical contributions\n"
         "- Limitations or open problems\n"
         "- Main results or claims\n\n"
-        "Write in short, information-dense sentences.\n"
-        "Do NOT summarize. Do NOT add background.\n\n"
+        "Extract the following information as short bullet points.\n"
+        "Include enough detail to understand the technical contribution.\n"
         "Section:\n"
         f"{text_chunk}\n"
     )
-
-    return _call_gemini(client, prompt, max_output_tokens=250)
+    
+    # result = _call_gemini(client, prompt, max_output_tokens=250)
+    result = _call_llm(client, prompt, max_output_tokens=250)
+    if not result:
+        debug("Key point extraction returned EMPTY")
+    return result
 
 def _summarize_paper(client, paper_text: str) -> str:
     chunks = _chunk_text(paper_text)
+
     extracted_parts = []
 
     for i, chunk in enumerate(chunks):
@@ -54,9 +71,13 @@ def _summarize_paper(client, paper_text: str) -> str:
         if extracted:
             extracted_parts.append(extracted)
             print(f"    Extracted key points from chunk {i+1}/{len(chunks)}")
-
+            
+    debug(f"Extracted parts count: {len(extracted_parts)}")
     if not extracted_parts:
+        debug("No key points extracted from any chunk")
         return ""
+
+        
 
     merged_extraction = "\n".join(extracted_parts)
 
@@ -74,7 +95,68 @@ def _summarize_paper(client, paper_text: str) -> str:
         f"{merged_extraction}\n"
     )
 
-    return _call_gemini(client, summary_prompt, max_output_tokens=500)
+    # return _call_gemini(client, summary_prompt, max_output_tokens=500)
+    return _call_llm(client, summary_prompt, max_output_tokens=500)
+
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        try:
+            from citation_tree.config import OPENAI_API_KEY
+            if not OPENAI_API_KEY:
+                return None
+
+            _openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        except Exception as exc:
+            print(f"Failed to initialise OpenAI client: {exc}")
+
+    return _openai_client
+
+def _call_llm(client, prompt, max_output_tokens=600):
+
+    MAX_PROMPT_CHARS = 12000
+    if len(prompt) > MAX_PROMPT_CHARS:
+        debug(f"Prompt too large ({len(prompt)} chars) — truncating")
+        prompt = prompt[:MAX_PROMPT_CHARS]
+
+    for attempt in range(3):
+        try:
+            rate_limiter.wait()
+
+            response = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": "You are an expert academic reviewer."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=max_output_tokens,
+            )
+
+            text = (response.choices[0].message.content or "").strip()
+
+            if not text:
+                debug("Empty response — retrying")
+                continue
+
+            word_count = len(text.split())
+
+            # debug(f"Response length: {len(text)}")
+            # debug(f"Response words: {word_count}")
+            # debug(f"Preview: {text[:200]}")
+
+            if word_count < 15:
+                debug("Response too short — retrying")
+                continue
+
+            return text
+
+        except Exception as exc:
+            msg = " ".join(str(exc).splitlines())[:120]
+            debug(f"OpenAI error: {msg}")
+            _time.sleep(3 * (attempt + 1))
+
+    return ""
 
 # Lazy-loads sentence-transformers (all-MiniLM-L6-v2)
 def _get_similarity_model():
@@ -123,13 +205,15 @@ def _trim_to_last_sentence(text: str) -> str:
         return text.strip()
     return text[: matches[-1].end()].strip()
 
-####### CHECK IS THIS IS PARALLELIZING BECAUSE IF U SEND IN PAPERS PARALLELY THEN
-####### THE INPUT TOKEN LIMIT WILL BE EXCEEDED
+
 # Generates an explanation of how the parent extends/improves on the child, using the Gemini API if available, 
 # or returning an empty string if not.
 def generate_improvement_explanation(parent: Paper, child: Paper) -> str:
     parent_text = (parent.full_text or parent.abstract or parent.title or "").strip()
     child_text = (child.full_text or child.abstract or child.title or "").strip()
+
+    if parent_text and child_text:
+        debug("Both parent and child have text for Gemini input.")
 
     # MAX_INPUT_CHARS = 6000
     # parent_text = parent_text[:MAX_INPUT_CHARS]
@@ -151,17 +235,25 @@ def generate_improvement_explanation(parent: Paper, child: Paper) -> str:
 # Trying multiple models with retries in case of rate-limiting or quota exhaustion
 def _call_gemini(client, prompt, max_output_tokens=600):
     models_to_try = [
-        "gemini-2.5-pro",
-        "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
         "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
     ]
 
+    MAX_PROMPT_CHARS = 12000
+    if len(prompt) > MAX_PROMPT_CHARS:
+        debug(f"Prompt too large ({len(prompt)} chars) — truncating")
+        prompt = prompt[:MAX_PROMPT_CHARS]
+
     for model_name in models_to_try:
-        for attempt in range(2):
+        debug(f"Calling Gemini with model {model_name}")
+
+        for attempt in range(3):
             try:
-              
+                rate_limiter.wait()
+
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
@@ -170,19 +262,47 @@ def _call_gemini(client, prompt, max_output_tokens=600):
                         max_output_tokens=max_output_tokens,
                     ),
                 )
-                # print("RAW RESPONSE:", response)
-                text = (response.text or "").strip()
-                if text:
-                    return text
-            except Exception as exc:
-                print("Gemini error:", exc)
-                return ""
 
+                text = (response.text or "").strip()
+
+                if not text:
+                    debug("Empty response from Gemini — retrying")
+                    continue
+
+                word_count = len(text.split())
+
+                debug(f"Response text length: {len(text)}")
+                debug(f"Response words: {word_count}")
+                debug(f"Response preview: {text[:200]}")
+
+                if word_count < 15:
+                    debug("Response too short — retrying")
+                    continue
+
+                return text
+
+            except Exception as exc:
+                msg = " ".join(str(exc).splitlines())[:120]
+
+                if "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
+                    wait = 5 * (attempt + 1)
+                    debug(f"Rate limited — sleeping {wait}s")
+                    _time.sleep(wait)
+                else:
+                    debug(f"Gemini error with {model_name}: {msg}")
+
+        debug(f"Model {model_name} failed — trying next model")
+
+    debug("All Gemini models failed")
     return ""
 
 # Generates an explanation using the Gemini API, with retries and model fallbacks in case of rate-limiting or quota exhaustion
 def _generate_with_gemini(parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
-    client = _get_gemini_model()
+    # client = _get_gemini_model()
+    client = OpenAI(
+        api_key=GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
     if client is None:
         return ""
     
@@ -261,6 +381,7 @@ def _generate_with_gemini(parent: Paper, child: Paper, parent_text: str, child_t
     #     print("Child summary done")
     #     child.summary = child_summary
 
+    print("===============STARTING A NEW PAIR OF PAPERS=============")
     parent_summary = _summarize_paper(client, parent_text)
     if not parent_summary:
         print("Failed to summarize parent paper.")
@@ -298,11 +419,15 @@ def _generate_with_gemini(parent: Paper, child: Paper, parent_text: str, child_t
         "connection between the two papers."
     )
 
-    final_text = _call_gemini(
-        client,
-        prompt,
-        max_output_tokens=250,
-    )
+    # final_text = _call_gemini(
+    #     client,
+    #     prompt,
+    #     max_output_tokens=250,
+    # )
+
+    final_text = _call_llm(client, prompt, max_output_tokens=250)
+    debug(f"Final explanation length: {len(final_text)}")
+    debug(f"Final explanation preview: {final_text[:200]}")
 
     if final_text:
         return _trim_to_last_sentence(final_text)
