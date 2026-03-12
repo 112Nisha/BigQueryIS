@@ -10,9 +10,8 @@ from typing import Any
 
 from citation_tree.config import CACHE_DIR, RATE_LIMIT
 
-
+# Cile-system cache keyed by MD5 hash of a string key
 class Cache:
-    """Simple file-system cache keyed by MD5 hash of a string key."""
 
     def __init__(self, directory: str = CACHE_DIR, ttl_days: int = 7):
         self.dir = directory
@@ -43,9 +42,8 @@ class Cache:
         except Exception:
             pass
 
-
+# Rate limiter to ensure we don't exceed API limits via calls to the API
 class RateLimiter:
-    """Ensures a minimum interval between successive calls."""
 
     def __init__(self, interval: float = RATE_LIMIT):
         self.interval = interval

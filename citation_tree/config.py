@@ -16,10 +16,10 @@ ARXIV_API = "http://export.arxiv.org/api/query"
 OPENALEX_API = "https://api.openalex.org"
 
 # Default input — change this to any file inside pdfs/
-INPUT_PDF = os.path.join(PDFS_DIR, "0704.0001.pdf")
+INPUT_PDF = os.path.join(PDFS_DIR, "attention.pdf")
 
 # Tree parameters
-MAX_DEPTH = 2
+MAX_DEPTH = 3
 MAX_PAPERS = 20
 MIN_RELEVANCE = 0.15
 
@@ -28,4 +28,6 @@ RATE_LIMIT = 1.2
 
 # Google Gemini API (free tier — used for improvement explanations in ml.py)
 # Get a free key at https://aistudio.google.com/app/apikey
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "") or "AIzaSyA4hTo5DeRGRG6_yUsVF9VMDRdCSj1M2oQ"
+
+# GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "") or "AIzaSyA4hTo5DeRGRG6_yUsVF9VMDRdCSj1M2oQ"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "") or "AIzaSyCNcjSsos4UiJ2wQPkkY80EopIP4nOeM1Y"

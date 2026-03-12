@@ -24,26 +24,26 @@ def main():
         pdf = os.path.join(PDFS_DIR, pdf)
 
     if not os.path.exists(pdf):
-        print(f"Error: file not found – {pdf}")
+        print(f"Error: file not found - {pdf}")
         sys.exit(1)
 
     builder = TreeBuilder()
     tree = builder.build(pdf)
 
-    # Save JSON
+    # Save JSON of the tree structure 
     json_path = os.path.join(OUTPUT_DIR, "citation_tree.json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(tree.to_json(), f, indent=2, ensure_ascii=False)
     print(f"  JSON saved to: {json_path}")
 
-    # Render HTML
+    # Render HTML page
     html_path = os.path.join(OUTPUT_DIR, "citation_tree.html")
     render_html(tree, html_path)
 
     # Open in browser
     webbrowser.open(f"file://{html_path}")
 
-    print(f"\n  Done! ({len(tree.papers)} papers, {len(tree.edges)} edges)")
+    print(f"\n  Done: ({len(tree.papers)} papers, {len(tree.edges)} edges)")
 
 
 if __name__ == "__main__":

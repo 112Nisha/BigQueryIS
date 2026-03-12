@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+import re
 
-
+# A single academic paper with metadata and fields for tree position and similarity score (relevance to parent)
 @dataclass
 class Paper:
-    """A single academic paper with metadata and tree-position fields."""
 
     id: str
     title: str
@@ -30,11 +30,11 @@ class Paper:
     full_text: Optional[str] = None
     improvement: str = ""
     similarity_to_parent: float = 0.0
-
+    summary: str = ""
+    
+    # Removes latex math symbols from the text
     @staticmethod
     def _clean_latex(text: str) -> str:
-        """Remove LaTeX math symbols from text."""
-        import re
         if not text:
             return text
         text = re.sub(r'\$\$[^$]*\$\$', '', text)
@@ -50,7 +50,8 @@ class Paper:
         text = re.sub(r'\bminimal\b', '', text)
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
-
+    
+    # Converts the Paper object to a dictionary, this is for JSON serialization
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -72,12 +73,14 @@ class Paper:
             "relevance_score": round(self.relevance_score, 3),
             "improvement": self._clean_latex(self.improvement),
             "similarity_to_parent": round(self.similarity_to_parent, 3),
+            "text": self._clean_latex((self.full_text or "")),
+            "summary": self._clean_latex(self.summary),
         }
 
 
+# A rooted tree of papers connected by citation / reference edges
 @dataclass
 class CitationTree:
-    """A rooted tree of papers connected by citation / reference edges."""
 
     root: Paper
     papers: Dict[str, Paper] = field(default_factory=dict)

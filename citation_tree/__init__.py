@@ -1,1 +1,1 @@
-"""Citation Tree Builder — discover, explain, and visualize paper lineage."""
+"""Citation Tree Builder — discover, explain, and visualize reference paper lineage of a given paper"""

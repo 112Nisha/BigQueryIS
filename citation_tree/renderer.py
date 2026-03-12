@@ -8,7 +8,7 @@ from citation_tree.models import CitationTree
 
 
 def render_html(tree: CitationTree, output_path: str):
-    """Write a self-contained interactive HTML page for the citation tree."""
+    """Write a self-contained interactive HTML page for the reference tree."""
 
     tree_json = json.dumps(tree.to_json(), ensure_ascii=False)
     root_title_safe = (
@@ -19,7 +19,7 @@ def render_html(tree: CitationTree, output_path: str):
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
         '<meta charset="UTF-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
-        f"<title>Citation Tree – {root_title_safe}</title>\n"
+        f"<title>Reference Tree – {root_title_safe}</title>\n"
         "<style>\n"
         "  :root {\n"
         "    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;\n"
@@ -93,7 +93,7 @@ def render_html(tree: CitationTree, output_path: str):
         "  .search-box:focus { border-color: var(--accent); }\n"
         "</style>\n</head>\n<body>\n"
         "<header>\n"
-        "  <h1>Citation Tree</h1>\n"
+        "  <h1>Reference Tree</h1>\n"
         f'  <p>Root: {root_title_safe}</p>\n'
         "</header>\n\n"
         '<div class="container">\n'
@@ -201,7 +201,7 @@ def render_html(tree: CitationTree, output_path: str):
         "    const cleanedImprovement = cleanLatex(p.improvement);\n"
         "    // Only show if it looks like actual content, not a prompt echo\n"
         "    if (cleanedImprovement.length > 20 && !cleanedImprovement.includes('Paper A:') && !cleanedImprovement.includes('Original paper:')) {\n"
-        "      html += `<div class=\"detail-section\"><h3>How this paper improves on its parent</h3>\n"
+        "      html += `<div class=\"detail-section\"><h3>How the parent improves on this paper</h3>\n"
         "        <div class=\"improvement-box\">${cleanedImprovement}</div></div>`;\n"
         "    }\n"
         "  }\n"

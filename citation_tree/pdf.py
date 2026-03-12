@@ -4,19 +4,55 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import List
 
+import requests
+import tika
 from tika import parser as tika_parser
+tika.initVM()
 
 
+# Downloads a paper's PDF to pdfs_dir if it is not already cached.
+# Uses arxiv_id as the filename (e.g. 1706.03762.pdf).
+# Returns the local path on success, or None if the paper has no arxiv_id or the download fails.
+def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
+    arxiv_id = getattr(paper, "arxiv_id", None)
+    pdf_url = getattr(paper, "pdf_url", None)
+
+    if not arxiv_id:
+        return None
+
+    local_path = os.path.join(pdfs_dir, f"{arxiv_id}.pdf")
+
+    # Already cached — no download needed
+    if os.path.exists(local_path):
+        return local_path
+
+    url = pdf_url or f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+
+    try:
+        time.sleep(rate_limit)
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"}
+        resp = requests.get(url, headers=headers, timeout=30, stream=True)
+        resp.raise_for_status()
+        os.makedirs(pdfs_dir, exist_ok=True)
+        with open(local_path, "wb") as fh:
+            for chunk in resp.iter_content(chunk_size=8192):
+                fh.write(chunk)
+        return local_path
+    except Exception as exc:
+        print(f"  PDF download failed ({arxiv_id}): {exc}")
+        return None
+
+# Extracts title, abstract, references, and arXiv ID from a PDF
 def extract_pdf(filepath: str) -> dict:
-    """Extract title, abstract, references, and arXiv ID from a PDF."""
     try:
         parsed = tika_parser.from_file(filepath)
         text = parsed.get("content", "") or ""
         meta = parsed.get("metadata", {}) or {}
     except Exception as e:
-        print(f"  ⚠ PDF extraction error: {e}")
+        print(f"  PDF extraction error: {e}")
         return {
             "text": "",
             "title": None,
@@ -33,51 +69,47 @@ def extract_pdf(filepath: str) -> dict:
         "arxiv_id": _extract_arxiv_id(text, filepath),
     }
 
-
+# Extracts title from PDF text and metadata
 def _extract_title(text: str, meta: dict) -> str | None:
-    # First try metadata sources - these are usually more reliable
     for k in ("dc:title", "title", "Title", "pdf:docinfo:title"):
         if meta.get(k) and len(str(meta[k]).strip()) > 5:
             title = str(meta[k]).strip()
-            # Skip generic or unhelpful metadata titles
             if title.lower() not in ("untitled", "document", "microsoft word"):
                 return title
     
-    # Build list of candidate titles from the first ~60 lines
     candidates = []
     lines = [ln.strip() for ln in text.split("\n")[:60] if ln.strip()]
     
     for i, line in enumerate(lines):
-        # Skip lines that are clearly not titles
         if re.match(r"^(arXiv:|http|www\.|Page\s*\d|^\d+$|^\s*\d+\s*$)", line, re.I):
             continue
-        # Skip author-like lines (emails, affiliations)
+
+        if re.match(r"^\d+(\.\d+)*\s+", line):
+            continue
+
         if re.search(r"@|university|department|institute|\d{4,}", line, re.I):
             continue
-        # Skip headers/footers
+  
         if re.match(r"^(abstract|introduction|keywords|submitted|accepted|published)", line, re.I):
             continue
-        # Skip section headers like "1 Introduction" or "I. Background"
+
         if re.match(r"^(\d+|[IVXLC]+)\.?\s+[A-Z]", line):
             continue
-        # Skip very short or very long lines
+
         if not (15 < len(line) < 300):
             continue
-        # Skip lines ending with colon (likely section headers)
+
         if line.endswith(":"):
             continue
         
-        # Score candidates - earlier lines and title-cased lines are preferred
-        score = 100 - i  # Earlier is better
-        # Boost if line is mostly title-cased (capitals at word starts)
+        # Scoring heuristic to find the most likely title candidate among the lines, based on position, formatting cues, and content
+        score = 100 - i 
         words = line.split()
         title_cased = sum(1 for w in words if w and w[0].isupper())
         if len(words) > 2 and title_cased / len(words) > 0.6:
             score += 20
-        # Boost if it's in the first 10 lines
         if i < 10:
             score += 30
-        # Penalize lines that look like subtitles or descriptions
         if line.startswith(("A ", "An ", "The ", "We ", "This ", "In ")):
             score -= 10
         
@@ -90,6 +122,7 @@ def _extract_title(text: str, meta: dict) -> str | None:
     return None
 
 
+# Extracts abstract from PDF text using regex patterns to find the relevant section 
 def _extract_abstract(text: str) -> str | None:
     for pat in (
         r"(?:ABSTRACT|Abstract)\s*[:\.\-]?\s*(.*?)(?=\n\s*(?:I\.?\s+)?(?:INTRODUCTION|Introduction|1\.\s+Introduction|Keywords|KEYWORDS))",
@@ -102,7 +135,7 @@ def _extract_abstract(text: str) -> str | None:
                 return a[:2000]
     return None
 
-
+# Extracts references from PDF text by finding the relevant section
 def _extract_references(text: str) -> List[dict]:
     m = re.search(
         r"(?:^|\n)\s*(?:REFERENCES|References|BIBLIOGRAPHY)\s*\n", text, re.I
@@ -130,7 +163,7 @@ def _extract_references(text: str) -> List[dict]:
         )
     return out
 
-
+# Extracts arXiv ID from PDF text or filename
 def _extract_arxiv_id(text: str, filepath: str) -> str | None:
     m = re.search(r"(\d{4}\.\d{4,5})", os.path.basename(filepath))
     if m:
