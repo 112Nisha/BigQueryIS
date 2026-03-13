@@ -24,6 +24,7 @@ pip install requests tika
 ### 2. Install ML dependencies (optional but recommended)
 
 ```bash
+pip install openai
 pip install sentence-transformers numpy
 ```
 
