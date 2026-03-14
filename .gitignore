@@ -7,7 +7,6 @@ venv/
 .env
 
 # Data & output
-pdfs/*
 .cache/
 output/
 
