@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import os
 from typing import List, Set, Tuple
+import requests
+from sklearn import tree
+from sympy import root
 
 from citation_tree.cache import Cache
 from citation_tree.clients import ArxivClient, OAClient, S2Client
@@ -36,10 +39,7 @@ class TreeBuilder:
         self.visited: Set[str] = set()
         self.title_hashes: Set[str] = set()
 
-    # Builds the citation tree from a given pdf by extracting information for the root of the tree
-    # and then expanding the tree iteratively by looking up references and related papers via APIs, 
-    # scoring them for relevance, and adding the most relevant ones as child nodes.
-    def build(self, pdf_path: str) -> CitationTree:
+    def _prepare_root(self, pdf_path: str) -> Paper:
         print(f"\n{'=' * 60}\n  Citation Tree Builder\n{'=' * 60}")
         print(f"\n  Extracting: {os.path.basename(pdf_path)}")
         info = extract_pdf(pdf_path)
@@ -69,17 +69,9 @@ class TreeBuilder:
         if not root.full_text and info["text"]:
             root.full_text = info["text"]
         root.depth = 0
-
-        tree = CitationTree(root=root)
-        tree.papers[root.id] = root
-        self.visited.add(root.id)
-        self.title_hashes.add(title_hash(root.title))
-
-        print(
-            f"\n  Building tree with depth={self.max_depth} and max papers={self.max_papers}"
-        )
-        self._expand(tree, root, info["references"])
-
+        return root, info
+    
+    def _postprocess(self, tree: CitationTree, is_reference: bool) -> None:
         print("\n  Downloading PDFs and extracting full text")
         for paper in tree.papers.values():
             if paper.full_text:
@@ -100,10 +92,30 @@ class TreeBuilder:
             if paper.parent_id and paper.parent_id in tree.papers:
                 parent = tree.papers[paper.parent_id]
                 paper.similarity_to_parent = compute_similarity(parent.abstract or parent.title, paper.abstract or paper.title,)
-                paper.improvement = generate_improvement_explanation(parent, paper)
+                paper.improvement = generate_improvement_explanation(parent, paper, is_reference)
 
+    # Builds the citation tree from a given pdf by extracting information for the root of the tree
+    # and then expanding the tree iteratively by looking up references and related papers via APIs, 
+    # scoring them for relevance, and adding the most relevant ones as child nodes.
+    def build_reference_tree(self, pdf_path: str) -> CitationTree:
+        root, info = self._prepare_root(pdf_path)
+        tree = CitationTree(root=root)
+        tree.papers[root.id] = root
+        self.visited.add(root.id)
+        self.title_hashes.add(title_hash(root.title))
+        self._expand_references(tree, root, info["references"])
+        self._postprocess(tree, is_reference=True)
         return tree
-
+    
+    def build_citation_tree(self, pdf_path: str) -> CitationTree:
+        root, _ = self._prepare_root(pdf_path)
+        tree = CitationTree(root=root)
+        tree.papers[root.id] = root
+        self.visited.add(root.id)
+        self.title_hashes.add(title_hash(root.title))
+        self._expand_citations(tree, root)
+        self._postprocess(tree, is_reference=False)
+        return tree
     
     # Looks up a paper by title and/or arXiv ID across multiple APIs, and returns a Paper object if found
     def _lookup(self, title: str, arxiv_id: str | None = None) -> Paper | None:
@@ -123,7 +135,7 @@ class TreeBuilder:
 
     # Recursively expands the tree by looking up references and related papers, scoring them, 
     # and adding the most relevant ones as child nodes.
-    def _expand(self, tree: CitationTree, paper: Paper, local_refs: list | None = None,) -> None:
+    def _expand_references(self, tree: CitationTree, paper: Paper, local_refs: list | None = None,) -> None:
         if paper.depth >= self.max_depth or len(tree.papers) >= self.max_papers:
             return
 
@@ -239,7 +251,7 @@ class TreeBuilder:
 
         for child, _ in to_add:
             if len(tree.papers) < self.max_papers:
-                self._expand(tree, child)
+                self._expand_references(tree, child)
 
     # Return True if *a* and *b* are the same paper (self-citation guard)
     @staticmethod
@@ -296,3 +308,103 @@ class TreeBuilder:
             results.append((p, sc))
             
         return results
+    
+    def _get_citations(self, paper: Paper, limit: int = 20) -> List[Paper]:
+        citations: List[Paper] = []
+
+        s2_id = None
+
+        if paper.id.startswith("s2:"):
+            s2_id = paper.id.split(":", 1)[1]
+
+        elif paper.arxiv_id:
+            s2_paper = self.s2.get_by_arxiv(paper.arxiv_id)
+            if s2_paper:
+                s2_id = s2_paper.id.split(":", 1)[1]
+
+        if not s2_id and paper.title:
+            for p in self.s2.search(paper.title, limit=3):
+                if titles_match(paper.title, p.title):
+                    s2_id = p.id.split(":", 1)[1]
+                    break
+        if s2_id:
+            try:
+                headers = {
+                    "User-Agent": "CitationTree/2.0"
+                }
+                r = requests.get(
+                    f"https://api.semanticscholar.org/graph/v1/paper/{s2_id}/citations",
+                    params={
+                        "limit": limit,
+                        "fields": "title,abstract,externalIds"
+                    },
+                    headers=headers,   
+                    timeout=20,
+                )
+                if r.status_code == 200:
+                    for item in r.json().get("data", []) or []:
+                        cited = item.get("citingPaper")
+                        if cited:
+                            temp = Paper(
+                                id=f"s2:{cited.get('paperId')}",
+                                title=cited.get("title"),
+                                abstract=cited.get("abstract"),
+                                arxiv_id=(cited.get("externalIds") or {}).get("ArXiv"),
+                                relation_type="citation",
+                            )
+
+                            enriched = self._lookup(temp.title, temp.arxiv_id)
+
+                            if enriched:
+                                enriched.relation_type = "citation"
+                                citations.append(enriched)
+                            else:
+                                citations.append(temp)
+            except Exception as e:
+                print(f"  ⚠ citation fetch error: {e}")
+        return citations
+
+
+    # Recursively expands the tree by looking up citations, scoring them, 
+    # and adding the most relevant ones as child nodes.
+    def _expand_citations(self, tree: CitationTree, paper: Paper) -> None:
+        if paper.depth >= self.max_depth or len(tree.papers) >= self.max_papers:
+            return
+
+        indent = "  " * (paper.depth + 1)
+        print(f"{indent}[depth {paper.depth}] {paper.title[:50]}…")
+
+        related = self._get_citations(paper)
+        print(f"{indent}  Found {len(related)} citations")
+
+        to_add = []
+
+        for p in related:
+            if not p or not p.title:
+                continue
+
+            if self._is_same_paper(paper, p) or self._is_same_paper(tree.root, p):
+                continue
+
+            th = title_hash(p.title)
+            if p.id in self.visited or th in self.title_hashes:
+                continue
+
+            p.depth = paper.depth + 1
+            p.parent_id = paper.id
+            p.relevance_score = 1.0  
+            p.similarity_to_parent = compute_similarity(
+                paper.abstract or paper.title,
+                p.abstract or p.title
+            )
+
+            to_add.append(p)
+            self.visited.add(p.id)
+            self.title_hashes.add(th)
+
+        to_add = to_add[:8]
+
+        for child in to_add:
+            tree.papers[child.id] = child
+            tree.edges.append((paper.id, child.id, "citation"))
+            self._expand_citations(tree, child)

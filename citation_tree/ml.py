@@ -14,8 +14,7 @@ from typing import TYPE_CHECKING
 import time as _time
 from numpy import dot
 from openai import OpenAI
-_openai_client = None
-import re as _r
+import re
 from numpy.linalg import norm
 from citation_tree.cache import RateLimiter
 from citation_tree.config import GROQ_API_KEY
@@ -143,8 +142,8 @@ def compute_similarity(text_a: str, text_b: str) -> float:
     return float(dot(embeddings[0], embeddings[1])/ (norm(embeddings[0]) * norm(embeddings[1]) + 1e-9))
 
 # Trims text to the last full sentence, to avoid incomplete Gemini outputs after truncating the output
-def _trim_to_last_sentence(text: str) -> str:
-    import re
+def trim_to_last_sentence(text: str) -> str:
+    
     matches = list(re.finditer(r"[.!?]", text))
     if not matches:
         return text.strip()
@@ -153,17 +152,21 @@ def _trim_to_last_sentence(text: str) -> str:
 
 # Generates an explanation of how the parent extends/improves on the child, using the Gemini API if available, 
 # or returning an empty string if not.
-def generate_improvement_explanation(parent: Paper, child: Paper) -> str:
+def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: bool) -> str:
     parent_text = (parent.full_text or parent.abstract or parent.title or "").strip()
     child_text = (child.full_text or child.abstract or child.title or "").strip()
 
     if not parent_text or not child_text:
         return ""
     else:
-        print("Parent and child text for Gemini are ready")
+        print("Parent and child text for the model are ready")
 
 
-    explanation = _generate_with_gemini(parent, child, parent_text, child_text)
+    if is_reference:
+        explanation = _generate_with_gemini(parent, child, parent_text, child_text)
+    else:
+        explanation = _generate_with_gemini_citations(parent, child, parent_text, child_text)
+
     if explanation:
         return explanation
 
@@ -219,5 +222,58 @@ def _generate_with_gemini(parent: Paper, child: Paper, parent_text: str, child_t
     final_text = _call_llm(client, prompt, max_output_tokens=250)
 
     if final_text:
-        return _trim_to_last_sentence(final_text)    
+        return trim_to_last_sentence(final_text)    
+    return ""
+
+
+def _generate_with_gemini_citations(parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
+    # client = _get_gemini_model()
+    client = OpenAI(
+        api_key=GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
+    )
+    if client is None:
+        return ""
+    
+    print("===============STARTING A NEW PAIR OF PAPERS=============")
+    parent_summary = _summarize_paper(client, parent_text)
+    if not parent_summary:
+        print("Failed to summarize parent paper.")
+        return ""
+    print("Parent summary done")
+    parent.summary = parent_summary
+
+    child_summary = _summarize_paper(client, child_text)
+    if not child_summary:
+        print("Failed to summarize child paper.")
+        return ""
+    print("Child summary done")
+    child.summary = child_summary
+
+    prompt = (
+        "You are an expert academic reviewer.\n\n"
+        "Below are structured summaries of two research papers:\n"
+        "- A parent paper (the cited paper)\n"
+        "- A child paper (the citing paper)\n\n"
+        "Using ONLY the information provided, explain:\n\n"
+        "1. Which specific ideas, methods, or findings from the parent paper "
+        "influenced the child paper.\n"
+        "2. How the child paper improves upon, extends, or diverges from the "
+        "parent paper’s approach (e.g., new methods, stronger assumptions, "
+        "broader scope, improved results, or different conclusions).\n\n"
+        "Be concrete and technical.\n"
+        "Do not speculate beyond the summaries.\n"
+        "Do not use bullet points.\n\n"
+        "Parent paper summary:\n"
+        f"{parent_summary}\n\n"
+        "Child paper summary:\n"
+        f"{child_summary}\n\n"
+        "Write a concise explanation (120–180 words) focused on the most important "
+        "connection between the two papers."
+    )
+
+    final_text = _call_llm(client, prompt, max_output_tokens=250)
+
+    if final_text:
+        return trim_to_last_sentence(final_text)    
     return ""

@@ -9,40 +9,86 @@ from typing import List
 
 import requests
 import tika
+from citation_tree.ml import trim_to_last_sentence
 from tika import parser as tika_parser
 tika.initVM()
-
 
 # Downloads a paper's PDF to pdfs_dir if it is not already cached.
 # Uses arxiv_id as the filename (e.g. 1706.03762.pdf).
 # Returns the local path on success, or None if the paper has no arxiv_id or the download fails.
 def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
-    arxiv_id = getattr(paper, "arxiv_id", None)
-    pdf_url = getattr(paper, "pdf_url", None)
+    url = None
 
-    if not arxiv_id:
+    # using pdf url 
+    if getattr(paper, "pdf_url", None):
+        url = paper.pdf_url
+    
+    # using arxiv id to construct url
+    elif getattr(paper, "arxiv_id", None):
+        url = f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
+
+    # using title to search arxiv api
+    elif getattr(paper, "title", None):
+        try:
+            query = paper.title.replace(" ", "+")
+            search_url = f"http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=3"
+
+            r = requests.get(search_url, timeout=20)
+
+            if r.status_code == 200:
+                entries = re.findall(r"<id>http://arxiv.org/abs/(.*?)</id>", r.text)
+
+                for arxiv_id in entries:
+                    if arxiv_id:
+                        url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                        break
+
+        except Exception as e:
+            print(f"  arXiv search failed: {e}")
+
+    if not url:
+        print(f"  No PDF available for: {paper.title[:60]}")
         return None
 
-    local_path = os.path.join(pdfs_dir, f"{arxiv_id}.pdf")
+    if getattr(paper, "arxiv_id", None):
+        filename = f"{paper.arxiv_id}.pdf"
+    else:
+        safe_id = (paper.id or "unknown").replace(":", "_")
+        filename = f"{safe_id}.pdf"
 
-    # Already cached — no download needed
+    local_path = os.path.join(pdfs_dir, filename)
+
     if os.path.exists(local_path):
         return local_path
 
-    url = pdf_url or f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-
     try:
         time.sleep(rate_limit)
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"}
-        resp = requests.get(url, headers=headers, timeout=30, stream=True)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"
+        }
+
+        resp = requests.get(
+            url,
+            headers=headers,
+            timeout=30,
+            stream=True,
+            allow_redirects=True,
+        )
+
         resp.raise_for_status()
+
         os.makedirs(pdfs_dir, exist_ok=True)
+
         with open(local_path, "wb") as fh:
             for chunk in resp.iter_content(chunk_size=8192):
-                fh.write(chunk)
+                if chunk:
+                    fh.write(chunk)
+
         return local_path
+
     except Exception as exc:
-        print(f"  PDF download failed ({arxiv_id}): {exc}")
+        print(f"  PDF download failed ({paper.id}): {exc}")
         return None
 
 # Extracts title, abstract, references, and arXiv ID from a PDF
@@ -51,6 +97,7 @@ def extract_pdf(filepath: str) -> dict:
         parsed = tika_parser.from_file(filepath)
         text = parsed.get("content", "") or ""
         meta = parsed.get("metadata", {}) or {}
+        temp_abstract = _extract_abstract(text) or ""
     except Exception as e:
         print(f"  PDF extraction error: {e}")
         return {
@@ -64,7 +111,7 @@ def extract_pdf(filepath: str) -> dict:
     return {
         "text": text,
         "title": _extract_title(text, meta),
-        "abstract": _extract_abstract(text),
+        "abstract": trim_to_last_sentence(temp_abstract),  
         "references": _extract_references(text),
         "arxiv_id": _extract_arxiv_id(text, filepath),
     }

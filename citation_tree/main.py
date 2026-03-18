@@ -13,7 +13,7 @@ tika.initVM()
 
 from citation_tree.builder import TreeBuilder
 from citation_tree.config import INPUT_PDF, OUTPUT_DIR, PDFS_DIR
-from citation_tree.renderer import render_html
+from citation_tree.renderer import render_html_reference_tree, render_html_citation_tree
 
 
 def main():
@@ -28,7 +28,24 @@ def main():
         sys.exit(1)
 
     builder = TreeBuilder()
-    tree = builder.build(pdf)
+    # tree = builder.build_reference_tree(pdf)
+
+    # # Save JSON of the tree structure 
+    # json_path = os.path.join(OUTPUT_DIR, "citation_tree.json")
+    # with open(json_path, "w", encoding="utf-8") as f:
+    #     json.dump(tree.to_json(), f, indent=2, ensure_ascii=False)
+    # print(f"  JSON saved to: {json_path}")
+
+    # # Render HTML page
+    # html_path = os.path.join(OUTPUT_DIR, "citation_tree.html")
+    # render_html(tree, html_path)
+
+    # # Open in browser
+    # webbrowser.open(f"file://{html_path}")
+
+    # print(f"\n  Done: ({len(tree.papers)} papers, {len(tree.edges)} edges)")
+
+    tree = builder.build_citation_tree(pdf)
 
     # Save JSON of the tree structure 
     json_path = os.path.join(OUTPUT_DIR, "citation_tree.json")
@@ -38,7 +55,7 @@ def main():
 
     # Render HTML page
     html_path = os.path.join(OUTPUT_DIR, "citation_tree.html")
-    render_html(tree, html_path)
+    render_html_citation_tree(tree, html_path)
 
     # Open in browser
     webbrowser.open(f"file://{html_path}")
