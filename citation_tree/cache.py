@@ -6,10 +6,10 @@ import hashlib
 import json
 import os
 import time
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Any
 
-from citation_tree.config import CACHE_DIR, RATE_LIMIT
+from citation_tree.config import CACHE_DIR, GLOBAL_HTTP_MAX_CONCURRENCY, RATE_LIMIT
 
 # Cile-system cache keyed by MD5 hash of a string key
 class Cache:
@@ -58,3 +58,42 @@ class RateLimiter:
         if delta < self.interval:
             time.sleep(self.interval - delta)
         self.last = time.time()
+
+
+class GlobalRequestGate:
+    """Global HTTP concurrency + per-group min-interval throttling."""
+
+    _sem = BoundedSemaphore(max(1, GLOBAL_HTTP_MAX_CONCURRENCY))
+    _lock = Lock()
+    _last_by_group: dict[str, float] = {}
+
+    @classmethod
+    def _wait_group_interval(cls, group: str, min_interval: float):
+        if min_interval <= 0:
+            return
+        with cls._lock:
+            now = time.time()
+            last = cls._last_by_group.get(group, 0.0)
+            delay = min_interval - (now - last)
+            if delay > 0:
+                time.sleep(delay)
+                now = time.time()
+            cls._last_by_group[group] = now
+
+    @classmethod
+    def request(
+        cls,
+        http_client,
+        method: str,
+        url: str,
+        *,
+        group: str,
+        min_interval: float,
+        **kwargs,
+    ):
+        cls._sem.acquire()
+        try:
+            cls._wait_group_interval(group, min_interval)
+            return http_client.request(method, url, **kwargs)
+        finally:
+            cls._sem.release()

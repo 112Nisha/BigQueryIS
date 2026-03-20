@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Set, Tuple
 
 from citation_tree.cache import Cache
@@ -12,9 +13,11 @@ from citation_tree.config import (
     API_CITATION_LIMIT,
     API_REFERENCE_LIMIT,
     DEBUG_PRINT_ALL_CITERS,
+    MAX_FETCH_WORKERS,
     MAX_CHILDREN_PER_NODE,
     MAX_DEPTH,
     MAX_PAPERS,
+    MAX_POSTPROCESS_WORKERS,
     MIN_RELEVANCE,
     PDFS_DIR,
     RATE_LIMIT,
@@ -95,19 +98,24 @@ class TreeBuilder:
     
     def _postprocess(self, tree: CitationTree, is_reference: bool) -> None:
         print("\n  Downloading PDFs and extracting full text")
-        for paper in tree.papers.values():
-            if paper.full_text:
-                continue  
+        papers_to_process = [p for p in tree.papers.values() if not p.full_text]
+
+        def _hydrate_full_text(paper: Paper) -> tuple[Paper, str]:
             local_path = download_pdf(paper, PDFS_DIR, rate_limit=RATE_LIMIT)
             if local_path:
                 extracted = extract_pdf(local_path)
                 paper.full_text = extracted.get("text") or ""
                 if not paper.abstract and extracted.get("abstract"):
                     paper.abstract = extracted["abstract"]
-                status = f"{len(paper.full_text)} chars"
-            else:
-                status = "no PDF"
-            print(f"    {paper.title[:50]}… [{status}]")
+                return paper, f"{len(paper.full_text)} chars"
+            return paper, "no PDF"
+
+        if papers_to_process:
+            with ThreadPoolExecutor(max_workers=MAX_POSTPROCESS_WORKERS) as ex:
+                futures = [ex.submit(_hydrate_full_text, p) for p in papers_to_process]
+                for fut in as_completed(futures):
+                    paper, status = fut.result()
+                    print(f"    {paper.title[:50]}… [{status}]")
 
         if not llm_explanations_enabled():
             print("\n  Skipping improvement explanations (LLM disabled or key missing)")
@@ -370,11 +378,6 @@ class TreeBuilder:
                 if titles_match(paper.title, p.title):
                     s2_id = p.id.split(":", 1)[1]
                     break
-        if s2_id:
-            # Fetch all S2 citations so top-k is chosen from the full graph.
-            s2_citations = self.s2.get_citations(s2_id, limit=0)
-            citations.extend(s2_citations)
-
         oa_id = None
         if paper.id.startswith("oa:"):
             oa_id = paper.id.split(":", 1)[1]
@@ -384,9 +387,23 @@ class TreeBuilder:
                     oa_id = p.id.split(":", 1)[1]
                     break
 
-        if oa_id:
+        def _fetch_s2() -> list[Paper]:
+            if not s2_id:
+                return []
+            # Fetch all S2 citations so top-k is chosen from the full graph.
+            return self.s2.get_citations(s2_id, limit=0)
+
+        def _fetch_oa() -> list[Paper]:
+            if not oa_id:
+                return []
             # Also pull all OA citations and merge for maximum coverage.
-            citations.extend(self.oa.get_citations(oa_id, limit=0))
+            return self.oa.get_citations(oa_id, limit=0)
+
+        with ThreadPoolExecutor(max_workers=MAX_FETCH_WORKERS) as ex:
+            s2_future = ex.submit(_fetch_s2)
+            oa_future = ex.submit(_fetch_oa)
+            citations.extend(s2_future.result())
+            citations.extend(oa_future.result())
 
         dedup: list[Paper] = []
         seen_ids: set[str] = set()

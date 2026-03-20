@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import requests
 
-from citation_tree.cache import Cache, RateLimiter
+from citation_tree.cache import Cache, GlobalRequestGate
 from citation_tree.config import RATE_LIMIT
 from citation_tree.models import Paper
 
@@ -19,10 +19,22 @@ class BaseClient:
         headers: dict | None = None,
     ):
         self.cache = cache
-        self.limiter = RateLimiter(rate)
+        self.rate = rate
+        self.rate_group = "api"
         self.session = requests.Session()
         if headers:
             self.session.headers.update(headers)
+
+    def _get(self, url: str, *, params: dict | None = None, timeout: int = 30):
+        return GlobalRequestGate.request(
+            self.session,
+            "GET",
+            url,
+            group=self.rate_group,
+            min_interval=self.rate,
+            params=params,
+            timeout=timeout,
+        )
 
     def _request(self, key: str, fetch, label: str, multi: bool = True):
         """Fetch with cache-first semantics.
@@ -37,7 +49,6 @@ class BaseClient:
                 if multi
                 else self._to_paper(cached)
             )
-        self.limiter.wait()
         try:
             result = fetch()
             if multi:

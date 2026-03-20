@@ -6,7 +6,7 @@ from typing import List
 
 from citation_tree.cache import Cache
 from citation_tree.clients.base import BaseClient
-from citation_tree.config import OPENALEX_API
+from citation_tree.config import GLOBAL_OA_MIN_INTERVAL, OPENALEX_API
 from citation_tree.models import Paper
 
 
@@ -19,15 +19,16 @@ class OAClient(BaseClient):
     def __init__(self, cache: Cache):
         super().__init__(
             cache,
-            rate=0.2,
+            rate=GLOBAL_OA_MIN_INTERVAL,
             headers={
                 "User-Agent": "CitationTree/2.0 (mailto:research@example.com)"
             },
         )
+        self.rate_group = "oa"
 
     def search(self, query: str, limit: int = 10) -> List[Paper]:
         def fetch():
-            r = self.session.get(
+            r = self._get(
                 f"{OPENALEX_API}/works",
                 params={
                     "search": query,
@@ -52,7 +53,7 @@ class OAClient(BaseClient):
 
     def get_references(self, oa_id: str, limit: int = 50) -> List[Paper]:
         def fetch():
-            r = self.session.get(
+            r = self._get(
                 f"{OPENALEX_API}/works/{oa_id}", timeout=30
             )
             if r.status_code != 200:
@@ -60,9 +61,8 @@ class OAClient(BaseClient):
             refs = r.json().get("referenced_works", [])[:limit]
             if not refs:
                 return []
-            self.limiter.wait()
             filt = "|".join(x.split("/")[-1] for x in refs[:50])
-            r2 = self.session.get(
+            r2 = self._get(
                 f"{OPENALEX_API}/works",
                 params={
                     "filter": f"openalex_id:{filt}",
@@ -94,7 +94,7 @@ class OAClient(BaseClient):
 
             while fetch_all or (remaining and remaining > 0):
                 batch = per_page if fetch_all else min(per_page, remaining)
-                r = self.session.get(
+                r = self._get(
                     f"{OPENALEX_API}/works",
                     params={
                         "filter": f"cites:{oa_id}",

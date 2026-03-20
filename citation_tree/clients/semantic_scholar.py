@@ -6,7 +6,7 @@ from typing import List
 
 from citation_tree.cache import Cache
 from citation_tree.clients.base import BaseClient
-from citation_tree.config import SEMANTIC_SCHOLAR_API
+from citation_tree.config import GLOBAL_S2_MIN_INTERVAL, SEMANTIC_SCHOLAR_API
 from citation_tree.models import Paper
 
 
@@ -18,12 +18,13 @@ class S2Client(BaseClient):
 
     def __init__(self, cache: Cache):
         super().__init__(
-            cache, rate=1.0, headers={"User-Agent": "CitationTree/2.0"}
+            cache, rate=GLOBAL_S2_MIN_INTERVAL, headers={"User-Agent": "CitationTree/2.0"}
         )
+        self.rate_group = "s2"
 
     def search(self, query: str, limit: int = 10) -> List[Paper]:
         def fetch():
-            r = self.session.get(
+            r = self._get(
                 f"{SEMANTIC_SCHOLAR_API}/paper/search",
                 params={"query": query, "limit": limit, "fields": self._F},
                 timeout=30,
@@ -38,7 +39,7 @@ class S2Client(BaseClient):
 
     def get_by_arxiv(self, arxiv_id: str) -> Paper | None:
         def fetch():
-            r = self.session.get(
+            r = self._get(
                 f"{SEMANTIC_SCHOLAR_API}/paper/arXiv:{arxiv_id}",
                 params={"fields": self._F},
                 timeout=30,
@@ -67,7 +68,7 @@ class S2Client(BaseClient):
 
             while fetch_all or (remaining and remaining > 0):
                 batch = page_size if fetch_all else min(page_size, remaining)
-                r = self.session.get(
+                r = self._get(
                     f"{SEMANTIC_SCHOLAR_API}/paper/{paper_id}/{endpoint}",
                     params={
                         "limit": batch,

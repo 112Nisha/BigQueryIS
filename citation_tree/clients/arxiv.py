@@ -8,18 +8,19 @@ from xml.etree import ElementTree as ET
 
 from citation_tree.cache import Cache
 from citation_tree.clients.base import BaseClient
-from citation_tree.config import ARXIV_API
+from citation_tree.config import ARXIV_API, GLOBAL_ARXIV_MIN_INTERVAL
 from citation_tree.models import Paper
 
 
 class ArxivClient(BaseClient):
     def __init__(self, cache: Cache):
-        super().__init__(cache, rate=3.0)
+        super().__init__(cache, rate=GLOBAL_ARXIV_MIN_INTERVAL)
+        self.rate_group = "arxiv"
 
     def search(self, query: str, max_results: int = 10) -> List[Paper]:
         def fetch():
             q = " ".join(re.sub(r"[^\w\s]", " ", query).split()[:15])
-            r = self.session.get(
+            r = self._get(
                 ARXIV_API,
                 params={
                     "search_query": f"all:{q}",
@@ -38,7 +39,7 @@ class ArxivClient(BaseClient):
     def get_by_id(self, arxiv_id: str) -> Paper | None:
         def fetch():
             cid = re.sub(r"v\d+$", "", arxiv_id)
-            r = self.session.get(
+            r = self._get(
                 ARXIV_API, params={"id_list": cid}, timeout=30
             )
             if r.status_code == 200:

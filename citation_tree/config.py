@@ -42,6 +42,14 @@ MAX_SUMMARY_CHUNKS = 2
 # Debugging
 DEBUG_PRINT_ALL_CITERS = True
 
+# Performance
+MAX_FETCH_WORKERS = 2
+MAX_POSTPROCESS_WORKERS = 4
+GLOBAL_HTTP_MAX_CONCURRENCY = 8
+GLOBAL_ARXIV_MIN_INTERVAL = 1.2
+GLOBAL_S2_MIN_INTERVAL = 0.8
+GLOBAL_OA_MIN_INTERVAL = 0.25
+
 # Google Gemini API (free tier — used for improvement explanations in ml.py)
 # Get a free key at https://aistudio.google.com/app/apikey
 

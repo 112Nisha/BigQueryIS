@@ -10,6 +10,8 @@ from typing import List
 
 import requests
 import tika
+from citation_tree.cache import GlobalRequestGate
+from citation_tree.config import GLOBAL_ARXIV_MIN_INTERVAL
 from citation_tree.ml import trim_to_last_sentence
 from tika import parser as tika_parser
 tika.initVM()
@@ -39,8 +41,12 @@ def resolve_latest_arxiv_id(arxiv_id: str | None) -> str | None:
 
     base = normalized.split("v", 1)[0]
     try:
-        resp = requests.get(
+        resp = GlobalRequestGate.request(
+            requests,
+            "GET",
             "http://export.arxiv.org/api/query",
+            group="arxiv",
+            min_interval=GLOBAL_ARXIV_MIN_INTERVAL,
             params={"id_list": base},
             timeout=20,
         )
@@ -73,8 +79,12 @@ def ensure_latest_pdf_path(filepath: str, rate_limit: float = 1.2) -> str:
 
     try:
         time.sleep(rate_limit)
-        resp = requests.get(
+        resp = GlobalRequestGate.request(
+            requests,
+            "GET",
             f"https://arxiv.org/pdf/{latest_id}.pdf",
+            group="pdf",
+            min_interval=0.0,
             headers={"User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"},
             timeout=30,
             stream=True,
@@ -115,7 +125,14 @@ def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
             query = paper.title.replace(" ", "+")
             search_url = f"http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=3"
 
-            r = requests.get(search_url, timeout=20)
+            r = GlobalRequestGate.request(
+                requests,
+                "GET",
+                search_url,
+                group="arxiv",
+                min_interval=GLOBAL_ARXIV_MIN_INTERVAL,
+                timeout=20,
+            )
 
             if r.status_code == 200:
                 entries = re.findall(r"<id>http://arxiv.org/abs/(.*?)</id>", r.text)
@@ -150,8 +167,12 @@ def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
             "User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"
         }
 
-        resp = requests.get(
+        resp = GlobalRequestGate.request(
+            requests,
+            "GET",
             url,
+            group="pdf",
+            min_interval=0.0,
             headers=headers,
             timeout=30,
             stream=True,
