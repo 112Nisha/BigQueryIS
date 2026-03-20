@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import time
+from threading import Lock
 from typing import Any
 
 from citation_tree.config import CACHE_DIR, RATE_LIMIT
@@ -16,6 +17,7 @@ class Cache:
     def __init__(self, directory: str = CACHE_DIR, ttl_days: int = 7):
         self.dir = directory
         self.ttl = ttl_days * 86400
+        self._lock = Lock()
 
     def _path(self, key: str) -> str:
         return os.path.join(
@@ -27,8 +29,9 @@ class Cache:
         if not os.path.exists(p):
             return None
         try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            with self._lock:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
             if time.time() - data.get("_ts", 0) < self.ttl:
                 return data.get("v")
         except Exception:
@@ -37,8 +40,9 @@ class Cache:
 
     def set(self, key: str, value: Any):
         try:
-            with open(self._path(key), "w", encoding="utf-8") as f:
-                json.dump({"_ts": time.time(), "v": value}, f)
+            with self._lock:
+                with open(self._path(key), "w", encoding="utf-8") as f:
+                    json.dump({"_ts": time.time(), "v": value}, f)
         except Exception:
             pass
 

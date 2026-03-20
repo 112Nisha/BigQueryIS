@@ -58,18 +58,43 @@ class S2Client(BaseClient):
         limit: int,
     ) -> List[Paper]:
         def fetch():
-            r = self.session.get(
-                f"{SEMANTIC_SCHOLAR_API}/paper/{paper_id}/{endpoint}",
-                params={"limit": limit, "fields": self._F},
-                timeout=30,
-            )
             ps: list[Paper] = []
-            if r.status_code == 200:
-                for item in r.json().get("data", []):
+            # limit <= 0 means fetch all pages available from the endpoint.
+            fetch_all = limit <= 0
+            remaining = None if fetch_all else max(0, limit)
+            offset = 0
+            page_size = 100
+
+            while fetch_all or (remaining and remaining > 0):
+                batch = page_size if fetch_all else min(page_size, remaining)
+                r = self.session.get(
+                    f"{SEMANTIC_SCHOLAR_API}/paper/{paper_id}/{endpoint}",
+                    params={
+                        "limit": batch,
+                        "offset": offset,
+                        "fields": self._F,
+                    },
+                    timeout=30,
+                )
+                if r.status_code != 200:
+                    break
+
+                data = r.json().get("data", []) or []
+                if not data:
+                    break
+
+                for item in data:
                     inner = item.get(nested_key)
                     if inner and (p := self._parse(inner)):
                         p.relation_type = rel
                         ps.append(p)
+
+                if len(data) < batch:
+                    break
+
+                offset += len(data)
+                if not fetch_all and remaining is not None:
+                    remaining -= len(data)
             return ps
 
         tag = "refs" if endpoint == "references" else "cites"

@@ -85,22 +85,45 @@ class OAClient(BaseClient):
 
     def get_citations(self, oa_id: str, limit: int = 50) -> List[Paper]:
         def fetch():
-            r = self.session.get(
-                f"{OPENALEX_API}/works",
-                params={
-                    "filter": f"cites:{oa_id}",
-                    "per_page": limit,
-                    "sort": "cited_by_count:desc",
-                    "select": self._SEL,
-                },
-                timeout=30,
-            )
             ps: list[Paper] = []
-            if r.status_code == 200:
-                for i in r.json().get("results", []):
+
+            fetch_all = limit <= 0
+            per_page = 200 if fetch_all else min(200, limit)
+            remaining = None if fetch_all else max(0, limit)
+            page = 1
+
+            while fetch_all or (remaining and remaining > 0):
+                batch = per_page if fetch_all else min(per_page, remaining)
+                r = self.session.get(
+                    f"{OPENALEX_API}/works",
+                    params={
+                        "filter": f"cites:{oa_id}",
+                        "per_page": batch,
+                        "page": page,
+                        "sort": "cited_by_count:desc",
+                        "select": self._SEL,
+                    },
+                    timeout=30,
+                )
+                if r.status_code != 200:
+                    break
+
+                results = r.json().get("results", []) or []
+                if not results:
+                    break
+
+                for i in results:
                     if p := self._parse(i):
                         p.relation_type = "citation"
                         ps.append(p)
+
+                if len(results) < batch:
+                    break
+
+                if not fetch_all and remaining is not None:
+                    remaining -= len(results)
+                page += 1
+
             return ps
 
         return self._request(

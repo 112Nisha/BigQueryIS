@@ -7,12 +7,27 @@ import json
 from citation_tree.models import CitationTree
 
 
-def render_html_reference_tree(tree: CitationTree, output_path: str):
+def render_html_reference_tree(
+    tree: CitationTree,
+    output_path: str,
+    has_reference: bool = True,
+    has_citation: bool = True,
+):
     """Write a self-contained interactive HTML page for the reference tree."""
 
     tree_json = json.dumps(tree.to_json(), ensure_ascii=False)
     root_title_safe = (
         tree.root.title[:60].replace("'", "&#39;").replace('"', "&quot;")
+    )
+    ref_tab = (
+        '<a class="tab active" href="reference_tree.html">Reference Tree</a>'
+        if has_reference
+        else '<span class="tab disabled" title="Failed to generate">Reference Tree</span>'
+    )
+    cite_tab = (
+        '<a class="tab" href="citation_tree.html">Citation Tree</a>'
+        if has_citation
+        else '<span class="tab disabled" title="Failed to generate">Citation Tree</span>'
     )
 
     html = (
@@ -33,17 +48,15 @@ def render_html_reference_tree(tree: CitationTree, output_path: str):
         "    background: var(--bg); color: var(--text); line-height:1.5;\n"
         "    overflow-x: hidden;\n"
         "  }\n"
-        "  header {\n"
-        "    padding: 28px 40px 20px; border-bottom: 1px solid var(--border);\n"
-        "    background: linear-gradient(135deg, #131620 0%, #1a1d2f 100%);\n"
-        "  }\n"
-        "  header h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 4px; }\n"
-        "  header p { color: var(--muted); font-size: 0.85rem; }\n"
-        "  .container { display: flex; height: calc(100vh - 90px); }\n"
-        "  #tree-panel { flex: 1; overflow: auto; padding: 24px; }\n"
+        "  .tabs { display:flex; gap:12px; padding:16px 24px; border-bottom:1px solid var(--border); background:#141927; }\n"
+        "  .tab { flex:1; text-align:center; padding:14px 12px; border-radius:10px; border:1px solid var(--border); color:var(--text); text-decoration:none; font-weight:600; font-size:0.95rem; background:var(--surface); }\n"
+        "  .tab.active { border-color:var(--accent); box-shadow:0 0 0 2px rgba(108,140,255,.2); }\n"
+        "  .tab.disabled { opacity:.45; cursor:not-allowed; }\n"
+        "  .container { display: flex; min-height: calc(100vh - 84px); align-items: flex-start; }\n"
+        "  #tree-panel { flex: 1; padding: 24px; overflow: visible; }\n"
         "  #detail-panel {\n"
         "    width: 420px; border-left: 1px solid var(--border);\n"
-        "    background: var(--surface); overflow-y: auto; padding: 24px;\n"
+        "    background: var(--surface); overflow: visible; padding: 24px;\n"
         "    transition: width 0.2s;\n"
         "  }\n"
         "  #detail-panel.hidden { width: 0; padding: 0; overflow: hidden; }\n"
@@ -85,20 +98,10 @@ def render_html_reference_tree(tree: CitationTree, output_path: str):
         "  .stat .lbl { font-size:.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }\n"
         "  a { color: var(--accent); text-decoration: none; }\n"
         "  a:hover { text-decoration: underline; }\n"
-        "  .search-box {\n"
-        "    width:100%; padding: 10px 14px; border-radius:8px; border:1px solid var(--border);\n"
-        "    background: var(--bg); color: var(--text); font-size: 0.88rem; margin-bottom: 16px;\n"
-        "    outline: none;\n"
-        "  }\n"
-        "  .search-box:focus { border-color: var(--accent); }\n"
         "</style>\n</head>\n<body>\n"
-        "<header>\n"
-        "  <h1>Reference Tree</h1>\n"
-        f'  <p>Root: {root_title_safe}</p>\n'
-        "</header>\n\n"
+        f'<div class="tabs">{ref_tab}{cite_tab}</div>\n'
         '<div class="container">\n'
         '  <div id="tree-panel">\n'
-        '    <input class="search-box" id="search" placeholder="Filter papers…" />\n'
         '    <div id="tree-root"></div>\n'
         "  </div>\n"
         '  <div id="detail-panel" class="hidden">\n'
@@ -128,7 +131,6 @@ def render_html_reference_tree(tree: CitationTree, output_path: str):
         "  if (!p) return '';\n"
         "  const cls = isRoot ? 'node root' : 'node';\n"
         "  const year = p.year || '\\u2014';\n"
-        "  const cites = p.citations_count || 0;\n"
         "  const badge = isRoot ? '' : badgeFor(relation);\n"
         "  const sim = p.similarity_to_parent\n"
         "    ? `&nbsp;\\u00b7&nbsp;sim ${Math.round(p.similarity_to_parent*100)}%`\n"
@@ -144,26 +146,15 @@ def render_html_reference_tree(tree: CitationTree, output_path: str):
         "      <div class=\"node-title\">${p.title}</div>\n"
         "      <div class=\"node-meta\">\n"
         "        <span>${year}</span>\n"
-        "        <span>${cites} cites</span>\n"
         "        ${badge}${sim}\n"
         "      </div>\n"
         "    </div>\n"
         "    ${kidHtml}\n"
         "  `;\n"
         "}\n\n"
-        "function renderTree(filter) {\n"
+        "function renderTree() {\n"
         "  const root = DATA.root_id;\n"
         "  document.getElementById('tree-root').innerHTML = renderNode(root, '', true);\n"
-        "  if (filter) {\n"
-        "    const lc = filter.toLowerCase();\n"
-        "    document.querySelectorAll('.node').forEach(n => {\n"
-        "      const p = papers[n.dataset.id];\n"
-        "      const match = p && (p.title.toLowerCase().includes(lc) ||\n"
-        "                          (p.abstract||'').toLowerCase().includes(lc) ||\n"
-        "                          p.authors.join(' ').toLowerCase().includes(lc));\n"
-        "      n.style.opacity = match ? '1' : '0.25';\n"
-        "    });\n"
-        "  }\n"
         "}\n\n"
         "function selectNode(id, ev) {\n"
         "  if (ev) ev.stopPropagation();\n"
@@ -194,7 +185,7 @@ def render_html_reference_tree(tree: CitationTree, output_path: str):
         "  if (p.authors.length)\n"
         "    html += `<div class=\"detail-section\"><h3>Authors</h3><p>${p.authors.join(', ')}</p></div>`;\n"
         "  html += `<div class=\"detail-section\"><h3>Details</h3>\n"
-        "    <p>Year: ${p.year||'\\u2014'} &nbsp;|&nbsp; Citations: ${p.citations_count} &nbsp;|&nbsp; Source: ${p.source}</p></div>`;\n"
+        "    <p>Year: ${p.year||'\\u2014'} &nbsp;|&nbsp; Source: ${p.source}</p></div>`;\n"
         "  if (p.abstract)\n"
         "    html += `<div class=\"detail-section\"><h3>Abstract</h3><p>${cleanLatex(p.abstract)}</p></div>`;\n"
         "  if (p.improvement && p.improvement.length > 10) {\n"
@@ -215,7 +206,6 @@ def render_html_reference_tree(tree: CitationTree, output_path: str):
         "    html += `<div class=\"detail-section\"><a href=\"${p.url}\" target=\"_blank\">View paper \\u2197</a></div>`;\n"
         "  content.innerHTML = html;\n"
         "}\n\n"
-        "document.getElementById('search').addEventListener('input', e => renderTree(e.target.value));\n"
         "renderTree();\n\n"
         "// Stats bar\n"
         "(() => {\n"
@@ -241,19 +231,34 @@ def render_html_reference_tree(tree: CitationTree, output_path: str):
 
 
 
-def render_html_citation_tree(tree: CitationTree, output_path: str):
-    """Write a self-contained interactive HTML page for the reference tree."""
+def render_html_citation_tree(
+    tree: CitationTree,
+    output_path: str,
+    has_reference: bool = True,
+    has_citation: bool = True,
+):
+    """Write a self-contained interactive HTML page for the citation tree."""
 
     tree_json = json.dumps(tree.to_json(), ensure_ascii=False)
     root_title_safe = (
         tree.root.title[:60].replace("'", "&#39;").replace('"', "&quot;")
+    )
+    ref_tab = (
+        '<a class="tab" href="reference_tree.html">Reference Tree</a>'
+        if has_reference
+        else '<span class="tab disabled" title="Failed to generate">Reference Tree</span>'
+    )
+    cite_tab = (
+        '<a class="tab active" href="citation_tree.html">Citation Tree</a>'
+        if has_citation
+        else '<span class="tab disabled" title="Failed to generate">Citation Tree</span>'
     )
 
     html = (
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
         '<meta charset="UTF-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
-        f"<title>Reference Tree – {root_title_safe}</title>\n"
+        f"<title>Citation Tree – {root_title_safe}</title>\n"
         "<style>\n"
         "  :root {\n"
         "    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;\n"
@@ -267,17 +272,15 @@ def render_html_citation_tree(tree: CitationTree, output_path: str):
         "    background: var(--bg); color: var(--text); line-height:1.5;\n"
         "    overflow-x: hidden;\n"
         "  }\n"
-        "  header {\n"
-        "    padding: 28px 40px 20px; border-bottom: 1px solid var(--border);\n"
-        "    background: linear-gradient(135deg, #131620 0%, #1a1d2f 100%);\n"
-        "  }\n"
-        "  header h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 4px; }\n"
-        "  header p { color: var(--muted); font-size: 0.85rem; }\n"
-        "  .container { display: flex; height: calc(100vh - 90px); }\n"
-        "  #tree-panel { flex: 1; overflow: auto; padding: 24px; }\n"
+        "  .tabs { display:flex; gap:12px; padding:16px 24px; border-bottom:1px solid var(--border); background:#141927; }\n"
+        "  .tab { flex:1; text-align:center; padding:14px 12px; border-radius:10px; border:1px solid var(--border); color:var(--text); text-decoration:none; font-weight:600; font-size:0.95rem; background:var(--surface); }\n"
+        "  .tab.active { border-color:var(--accent); box-shadow:0 0 0 2px rgba(108,140,255,.2); }\n"
+        "  .tab.disabled { opacity:.45; cursor:not-allowed; }\n"
+        "  .container { display: flex; min-height: calc(100vh - 84px); align-items: flex-start; }\n"
+        "  #tree-panel { flex: 1; padding: 24px; overflow: visible; }\n"
         "  #detail-panel {\n"
         "    width: 420px; border-left: 1px solid var(--border);\n"
-        "    background: var(--surface); overflow-y: auto; padding: 24px;\n"
+        "    background: var(--surface); overflow: visible; padding: 24px;\n"
         "    transition: width 0.2s;\n"
         "  }\n"
         "  #detail-panel.hidden { width: 0; padding: 0; overflow: hidden; }\n"
@@ -319,20 +322,10 @@ def render_html_citation_tree(tree: CitationTree, output_path: str):
         "  .stat .lbl { font-size:.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }\n"
         "  a { color: var(--accent); text-decoration: none; }\n"
         "  a:hover { text-decoration: underline; }\n"
-        "  .search-box {\n"
-        "    width:100%; padding: 10px 14px; border-radius:8px; border:1px solid var(--border);\n"
-        "    background: var(--bg); color: var(--text); font-size: 0.88rem; margin-bottom: 16px;\n"
-        "    outline: none;\n"
-        "  }\n"
-        "  .search-box:focus { border-color: var(--accent); }\n"
         "</style>\n</head>\n<body>\n"
-        "<header>\n"
-        "  <h1>Reference Tree</h1>\n"
-        f'  <p>Root: {root_title_safe}</p>\n'
-        "</header>\n\n"
+        f'<div class="tabs">{ref_tab}{cite_tab}</div>\n'
         '<div class="container">\n'
         '  <div id="tree-panel">\n'
-        '    <input class="search-box" id="search" placeholder="Filter papers…" />\n'
         '    <div id="tree-root"></div>\n'
         "  </div>\n"
         '  <div id="detail-panel" class="hidden">\n'
@@ -362,7 +355,6 @@ def render_html_citation_tree(tree: CitationTree, output_path: str):
         "  if (!p) return '';\n"
         "  const cls = isRoot ? 'node root' : 'node';\n"
         "  const year = p.year || '\\u2014';\n"
-        "  const cites = p.citations_count || 0;\n"
         "  const badge = isRoot ? '' : badgeFor(relation);\n"
         "  const sim = p.similarity_to_parent\n"
         "    ? `&nbsp;\\u00b7&nbsp;sim ${Math.round(p.similarity_to_parent*100)}%`\n"
@@ -378,26 +370,15 @@ def render_html_citation_tree(tree: CitationTree, output_path: str):
         "      <div class=\"node-title\">${p.title}</div>\n"
         "      <div class=\"node-meta\">\n"
         "        <span>${year}</span>\n"
-        "        <span>${cites} cites</span>\n"
         "        ${badge}${sim}\n"
         "      </div>\n"
         "    </div>\n"
         "    ${kidHtml}\n"
         "  `;\n"
         "}\n\n"
-        "function renderTree(filter) {\n"
+        "function renderTree() {\n"
         "  const root = DATA.root_id;\n"
         "  document.getElementById('tree-root').innerHTML = renderNode(root, '', true);\n"
-        "  if (filter) {\n"
-        "    const lc = filter.toLowerCase();\n"
-        "    document.querySelectorAll('.node').forEach(n => {\n"
-        "      const p = papers[n.dataset.id];\n"
-        "      const match = p && (p.title.toLowerCase().includes(lc) ||\n"
-        "                          (p.abstract||'').toLowerCase().includes(lc) ||\n"
-        "                          p.authors.join(' ').toLowerCase().includes(lc));\n"
-        "      n.style.opacity = match ? '1' : '0.25';\n"
-        "    });\n"
-        "  }\n"
         "}\n\n"
         "function selectNode(id, ev) {\n"
         "  if (ev) ev.stopPropagation();\n"
@@ -428,7 +409,7 @@ def render_html_citation_tree(tree: CitationTree, output_path: str):
         "  if (p.authors.length)\n"
         "    html += `<div class=\"detail-section\"><h3>Authors</h3><p>${p.authors.join(', ')}</p></div>`;\n"
         "  html += `<div class=\"detail-section\"><h3>Details</h3>\n"
-        "    <p>Year: ${p.year||'\\u2014'} &nbsp;|&nbsp; Citations: ${p.citations_count} &nbsp;|&nbsp; Source: ${p.source}</p></div>`;\n"
+        "    <p>Year: ${p.year||'\\u2014'} &nbsp;|&nbsp; Source: ${p.source}</p></div>`;\n"
         "  if (p.abstract)\n"
         "    html += `<div class=\"detail-section\"><h3>Abstract</h3><p>${cleanLatex(p.abstract)}</p></div>`;\n"
         "  if (p.improvement && p.improvement.length > 10) {\n"
@@ -449,7 +430,6 @@ def render_html_citation_tree(tree: CitationTree, output_path: str):
         "    html += `<div class=\"detail-section\"><a href=\"${p.url}\" target=\"_blank\">View paper \\u2197</a></div>`;\n"
         "  content.innerHTML = html;\n"
         "}\n\n"
-        "document.getElementById('search').addEventListener('input', e => renderTree(e.target.value));\n"
         "renderTree();\n\n"
         "// Stats bar\n"
         "(() => {\n"
@@ -470,3 +450,5 @@ def render_html_citation_tree(tree: CitationTree, output_path: str):
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"\n  Visualization saved to: {output_path}")
+
+

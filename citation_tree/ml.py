@@ -11,22 +11,73 @@ keyword heuristic.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+import hashlib
 import time as _time
 from numpy import dot
 from openai import OpenAI
 import re
 from numpy.linalg import norm
-from citation_tree.cache import RateLimiter
-from citation_tree.config import GROQ_API_KEY
+from citation_tree.cache import Cache, RateLimiter
+from citation_tree.config import (
+    GROQ_API_KEY,
+    LLM_EXPLANATIONS_ENABLED,
+    MAX_LLM_CALLS_PER_RUN,
+    MAX_SUMMARY_CHUNKS,
+    MAX_TEXT_CHARS_FOR_SUMMARY,
+    SUMMARY_CHUNK_SIZE,
+)
 
 if TYPE_CHECKING:
     from citation_tree.models import Paper
 
 rate_limiter = RateLimiter(1.2)
+_cache = Cache(ttl_days=30)
 
 _similarity_model = None
+_llm_client = None
+_llm_calls_used = 0
+_llm_budget_exhausted = False
 
-def _chunk_text(text: str, chunk_size: int = 15000):
+
+def llm_explanations_enabled() -> bool:
+    return LLM_EXPLANATIONS_ENABLED and bool(GROQ_API_KEY)
+
+
+def _budget_remaining() -> int:
+    return max(0, MAX_LLM_CALLS_PER_RUN - _llm_calls_used)
+
+
+def _pair_key(parent_id: str, child_id: str, is_reference: bool) -> str:
+    rel = "ref" if is_reference else "cite"
+    return f"ml:exp:{rel}:{parent_id}:{child_id}"
+
+
+def _summary_key(paper_id: str, text: str) -> str:
+    digest = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
+    return f"ml:sum:{paper_id}:{digest}"
+
+
+def _get_client() -> OpenAI | None:
+    global _llm_client
+    if not llm_explanations_enabled():
+        return None
+    if _llm_client is None:
+        _llm_client = OpenAI(
+            api_key=GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1",
+        )
+    return _llm_client
+
+
+def _select_text_for_summary(paper: Paper) -> str:
+    # Prefer abstract when available; it is much cheaper than full-text chunking.
+    base = (paper.abstract or "").strip()
+    if len(base) >= 400:
+        return base[:MAX_TEXT_CHARS_FOR_SUMMARY]
+    return (paper.full_text or paper.abstract or paper.title or "").strip()[:MAX_TEXT_CHARS_FOR_SUMMARY]
+
+
+def _chunk_text(text: str, chunk_size: int = SUMMARY_CHUNK_SIZE):
     return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 
@@ -50,6 +101,8 @@ def _extract_key_points(client, text_chunk: str) -> str:
 
 def _summarize_paper(client, paper_text: str) -> str:
     chunks = _chunk_text(paper_text)
+    if len(chunks) > MAX_SUMMARY_CHUNKS:
+        chunks = chunks[:MAX_SUMMARY_CHUNKS]
 
     extracted_parts = []
 
@@ -81,6 +134,11 @@ def _summarize_paper(client, paper_text: str) -> str:
     return _call_llm(client, summary_prompt, max_output_tokens=500)
 
 def _call_llm(client, prompt, max_output_tokens=600):
+    global _llm_calls_used, _llm_budget_exhausted
+
+    if _llm_budget_exhausted or _budget_remaining() <= 0:
+        _llm_budget_exhausted = True
+        return ""
 
     MAX_PROMPT_CHARS = 12000
     if len(prompt) > MAX_PROMPT_CHARS:
@@ -89,6 +147,7 @@ def _call_llm(client, prompt, max_output_tokens=600):
     for attempt in range(3):
         try:
             rate_limiter.wait()
+            _llm_calls_used += 1
 
             response = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
@@ -114,6 +173,13 @@ def _call_llm(client, prompt, max_output_tokens=600):
 
         except Exception as exc:
             msg = " ".join(str(exc).splitlines())[:120]
+            low = msg.lower()
+            if "rate" in low and "limit" in low:
+                _llm_budget_exhausted = True
+                return ""
+            if "quota" in low or "insufficient" in low:
+                _llm_budget_exhausted = True
+                return ""
             _time.sleep(3 * (attempt + 1))
 
     return ""
@@ -129,6 +195,10 @@ def _get_similarity_model():
         except ImportError:
             pass
     return _similarity_model
+
+
+def is_similarity_available() -> bool:
+    return _get_similarity_model() is not None
 
 
 # Computes the cosine similarity (0-1) between two texts using the sentence-transformers model - returns 0 if the model is unavailable 
@@ -153,49 +223,72 @@ def trim_to_last_sentence(text: str) -> str:
 # Generates an explanation of how the parent extends/improves on the child, using the Gemini API if available, 
 # or returning an empty string if not.
 def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: bool) -> str:
-    parent_text = (parent.full_text or parent.abstract or parent.title or "").strip()
-    child_text = (child.full_text or child.abstract or child.title or "").strip()
+    if not llm_explanations_enabled():
+        return ""
+
+    pair_cache_key = _pair_key(parent.id, child.id, is_reference)
+    cached_exp = _cache.get(pair_cache_key)
+    if cached_exp:
+        return cached_exp
+
+    if _llm_budget_exhausted or _budget_remaining() <= 0:
+        return ""
+
+    parent_text = _select_text_for_summary(parent)
+    child_text = _select_text_for_summary(child)
 
     if not parent_text or not child_text:
         return ""
-    else:
-        print("Parent and child text for the model are ready")
 
+    client = _get_client()
+    if client is None:
+        return ""
+
+    print(f"Parent/child text ready; LLM calls remaining: {_budget_remaining()}")
 
     if is_reference:
-        explanation = _generate_with_gemini(parent, child, parent_text, child_text)
+        explanation = _generate_with_gemini(client, parent, child, parent_text, child_text)
     else:
-        explanation = _generate_with_gemini_citations(parent, child, parent_text, child_text)
+        explanation = _generate_with_gemini_citations(client, parent, child, parent_text, child_text)
 
     if explanation:
+        _cache.set(pair_cache_key, explanation)
         return explanation
 
     return ""
 
 # Generates an explanation using the Gemini API, with retries and model fallbacks in case of rate-limiting or quota exhaustion
-def _generate_with_gemini(parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
-    # client = _get_gemini_model()
-    client = OpenAI(
-        api_key=GROQ_API_KEY,
-        base_url="https://api.groq.com/openai/v1"
-    )
-    if client is None:
-        return ""
+def _get_or_build_summary(client, paper: Paper, text: str) -> str:
+    if paper.summary:
+        return paper.summary
+
+    key = _summary_key(paper.id, text)
+    cached = _cache.get(key)
+    if cached:
+        paper.summary = cached
+        return cached
+
+    summary = _summarize_paper(client, text)
+    if summary:
+        paper.summary = summary
+        _cache.set(key, summary)
+    return summary
+
+
+def _generate_with_gemini(client, parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
     
     print("===============STARTING A NEW PAIR OF PAPERS=============")
-    parent_summary = _summarize_paper(client, parent_text)
+    parent_summary = _get_or_build_summary(client, parent, parent_text)
     if not parent_summary:
         print("Failed to summarize parent paper.")
         return ""
     print("Parent summary done")
-    parent.summary = parent_summary
 
-    child_summary = _summarize_paper(client, child_text)
+    child_summary = _get_or_build_summary(client, child, child_text)
     if not child_summary:
         print("Failed to summarize child paper.")
         return ""
     print("Child summary done")
-    child.summary = child_summary
 
     prompt = (
         "You are an expert academic reviewer.\n\n"
@@ -226,29 +319,20 @@ def _generate_with_gemini(parent: Paper, child: Paper, parent_text: str, child_t
     return ""
 
 
-def _generate_with_gemini_citations(parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
-    # client = _get_gemini_model()
-    client = OpenAI(
-        api_key=GROQ_API_KEY,
-        base_url="https://api.groq.com/openai/v1"
-    )
-    if client is None:
-        return ""
+def _generate_with_gemini_citations(client, parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
     
     print("===============STARTING A NEW PAIR OF PAPERS=============")
-    parent_summary = _summarize_paper(client, parent_text)
+    parent_summary = _get_or_build_summary(client, parent, parent_text)
     if not parent_summary:
         print("Failed to summarize parent paper.")
         return ""
     print("Parent summary done")
-    parent.summary = parent_summary
 
-    child_summary = _summarize_paper(client, child_text)
+    child_summary = _get_or_build_summary(client, child, child_text)
     if not child_summary:
         print("Failed to summarize child paper.")
         return ""
     print("Child summary done")
-    child.summary = child_summary
 
     prompt = (
         "You are an expert academic reviewer.\n\n"

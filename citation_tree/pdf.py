@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from threading import Lock
 from typing import List
 
 import requests
@@ -13,19 +14,100 @@ from citation_tree.ml import trim_to_last_sentence
 from tika import parser as tika_parser
 tika.initVM()
 
+# Tika server startup/parsing can race across threads; serialize parser calls.
+_TIKA_LOCK = Lock()
+
+_ARXIV_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?", re.I)
+
+
+def normalize_arxiv_id(arxiv_id: str | None) -> str | None:
+    if not arxiv_id:
+        return None
+    m = _ARXIV_ID_RE.search(arxiv_id)
+    if not m:
+        return None
+    base = m.group(1)
+    version = m.group(2) or ""
+    return f"{base}{version}"
+
+
+def resolve_latest_arxiv_id(arxiv_id: str | None) -> str | None:
+    """Resolve an arXiv id (base or versioned) to the latest available version."""
+    normalized = normalize_arxiv_id(arxiv_id)
+    if not normalized:
+        return None
+
+    base = normalized.split("v", 1)[0]
+    try:
+        resp = requests.get(
+            "http://export.arxiv.org/api/query",
+            params={"id_list": base},
+            timeout=20,
+        )
+        if resp.status_code == 200:
+            # arXiv entry ids look like: http://arxiv.org/abs/1706.03762v7
+            m = re.search(r"<id>\s*https?://arxiv\.org/abs/(\d{4}\.\d{4,5}(?:v\d+)?)\s*</id>", resp.text, re.I)
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return normalized
+
+
+def ensure_latest_pdf_path(filepath: str, rate_limit: float = 1.2) -> str:
+    """If *filepath* maps to an arXiv paper, return local path to the latest PDF.
+
+    Falls back to the original filepath when latest resolution/download fails.
+    """
+    if not os.path.exists(filepath):
+        return filepath
+
+    arxiv_id = _extract_arxiv_id("", filepath)
+    latest_id = resolve_latest_arxiv_id(arxiv_id)
+    if not latest_id:
+        return filepath
+
+    latest_path = os.path.join(os.path.dirname(filepath), f"{latest_id}.pdf")
+    if os.path.exists(latest_path):
+        return latest_path
+
+    try:
+        time.sleep(rate_limit)
+        resp = requests.get(
+            f"https://arxiv.org/pdf/{latest_id}.pdf",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"},
+            timeout=30,
+            stream=True,
+            allow_redirects=True,
+        )
+        resp.raise_for_status()
+        with open(latest_path, "wb") as fh:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    fh.write(chunk)
+        return latest_path
+    except Exception:
+        return filepath
+
 # Downloads a paper's PDF to pdfs_dir if it is not already cached.
 # Uses arxiv_id as the filename (e.g. 1706.03762.pdf).
 # Returns the local path on success, or None if the paper has no arxiv_id or the download fails.
 def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
     url = None
 
+    latest_arxiv_id = resolve_latest_arxiv_id(getattr(paper, "arxiv_id", None))
+    if latest_arxiv_id:
+        paper.arxiv_id = latest_arxiv_id
+
     # using pdf url 
-    if getattr(paper, "pdf_url", None):
+    if getattr(paper, "pdf_url", None) and (
+        "arxiv.org/pdf/" not in paper.pdf_url or not latest_arxiv_id
+    ):
         url = paper.pdf_url
     
     # using arxiv id to construct url
-    elif getattr(paper, "arxiv_id", None):
-        url = f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
+    elif latest_arxiv_id:
+        url = f"https://arxiv.org/pdf/{latest_arxiv_id}.pdf"
 
     # using title to search arxiv api
     elif getattr(paper, "title", None):
@@ -50,8 +132,8 @@ def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
         print(f"  No PDF available for: {paper.title[:60]}")
         return None
 
-    if getattr(paper, "arxiv_id", None):
-        filename = f"{paper.arxiv_id}.pdf"
+    if latest_arxiv_id:
+        filename = f"{latest_arxiv_id}.pdf"
     else:
         safe_id = (paper.id or "unknown").replace(":", "_")
         filename = f"{safe_id}.pdf"
@@ -94,7 +176,8 @@ def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
 # Extracts title, abstract, references, and arXiv ID from a PDF
 def extract_pdf(filepath: str) -> dict:
     try:
-        parsed = tika_parser.from_file(filepath)
+        with _TIKA_LOCK:
+            parsed = tika_parser.from_file(filepath)
         text = parsed.get("content", "") or ""
         meta = parsed.get("metadata", {}) or {}
         temp_abstract = _extract_abstract(text) or ""
@@ -212,8 +295,8 @@ def _extract_references(text: str) -> List[dict]:
 
 # Extracts arXiv ID from PDF text or filename
 def _extract_arxiv_id(text: str, filepath: str) -> str | None:
-    m = re.search(r"(\d{4}\.\d{4,5})", os.path.basename(filepath))
+    m = re.search(r"(\d{4}\.\d{4,5}(?:v\d+)?)", os.path.basename(filepath), re.I)
     if m:
         return m.group(1)
-    m = re.search(r"arXiv:(\d{4}\.\d{4,5})", text)
+    m = re.search(r"arXiv:(\d{4}\.\d{4,5}(?:v\d+)?)", text, re.I)
     return m.group(1) if m else None

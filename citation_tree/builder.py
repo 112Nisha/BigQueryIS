@@ -5,18 +5,29 @@ from __future__ import annotations
 import hashlib
 import os
 from typing import List, Set, Tuple
-import requests
-from sklearn import tree
-from sympy import root
 
 from citation_tree.cache import Cache
 from citation_tree.clients import ArxivClient, OAClient, S2Client
-from citation_tree.config import MAX_DEPTH, MAX_PAPERS, MIN_RELEVANCE, PDFS_DIR, RATE_LIMIT
-from citation_tree.ml import compute_similarity, generate_improvement_explanation
+from citation_tree.config import (
+    API_CITATION_LIMIT,
+    API_REFERENCE_LIMIT,
+    DEBUG_PRINT_ALL_CITERS,
+    MAX_CHILDREN_PER_NODE,
+    MAX_DEPTH,
+    MAX_PAPERS,
+    MIN_RELEVANCE,
+    PDFS_DIR,
+    RATE_LIMIT,
+)
+from citation_tree.ml import (
+    compute_similarity,
+    generate_improvement_explanation,
+    is_similarity_available,
+    llm_explanations_enabled,
+)
 from citation_tree.models import CitationTree, Paper
-from citation_tree.pdf import download_pdf, extract_pdf
+from citation_tree.pdf import download_pdf, ensure_latest_pdf_path, extract_pdf
 from citation_tree.text_utils import important_words, title_hash, titles_match
-from citation_tree.ml import compute_similarity
 
 # Builds a CitationTree from a given PDF
 class TreeBuilder:
@@ -35,12 +46,21 @@ class TreeBuilder:
         self.arxiv = ArxivClient(cache)
         self.s2 = S2Client(cache)
         self.oa = OAClient(cache)
+        self.similarity_available = is_similarity_available()
 
         self.visited: Set[str] = set()
         self.title_hashes: Set[str] = set()
 
     def _prepare_root(self, pdf_path: str) -> Paper:
         print(f"\n{'=' * 60}\n  Citation Tree Builder\n{'=' * 60}")
+        latest_pdf_path = ensure_latest_pdf_path(pdf_path, rate_limit=RATE_LIMIT)
+        if latest_pdf_path != pdf_path:
+            print(
+                f"\n  Using latest arXiv version: "
+                f"{os.path.basename(pdf_path)} -> {os.path.basename(latest_pdf_path)}"
+            )
+        pdf_path = latest_pdf_path
+
         print(f"\n  Extracting: {os.path.basename(pdf_path)}")
         info = extract_pdf(pdf_path)
 
@@ -50,6 +70,8 @@ class TreeBuilder:
         if arxiv_id:
             print(f"  arXiv : {arxiv_id}")
         print(f"  References: {len(info['references'])} extracted")
+        if not self.similarity_available:
+            print("  Similarity model unavailable: semantic filter disabled")
 
         root = self._lookup(title, arxiv_id)
 
@@ -86,6 +108,10 @@ class TreeBuilder:
             else:
                 status = "no PDF"
             print(f"    {paper.title[:50]}… [{status}]")
+
+        if not llm_explanations_enabled():
+            print("\n  Skipping improvement explanations (LLM disabled or key missing)")
+            return
 
         print("\n  Generating improvement explanations")
         for paper in tree.papers.values():
@@ -143,6 +169,13 @@ class TreeBuilder:
         print(f"{indent}[depth {paper.depth}] {paper.title[:50]}…")
 
         related: List[Paper] = []
+        drop_stats = {
+            "below_relevance": 0,
+            "below_similarity": 0,
+            "self_or_root": 0,
+            "duplicate": 0,
+            "invalid": 0,
+        }
 
         # checking multiple APIs for references, starting with the most specific (S2 and OA with ID) 
         # and falling back to title search in other sources if needed
@@ -150,7 +183,7 @@ class TreeBuilder:
         for prefix, label, client in client_prefix_list:
             if paper.id.startswith(prefix):
                 api_id = paper.id[len(prefix):]
-                refs = client.get_references(api_id, limit=20)
+                refs = client.get_references(api_id, limit=API_REFERENCE_LIMIT)
                 print(f"{indent}  {label}: {len(refs)} references")
                 related.extend(refs)
 
@@ -160,7 +193,7 @@ class TreeBuilder:
                     for found in client.search(paper.title, limit=3):
                         if titles_match(paper.title, found.title):
                             api_id = found.id.split(":", 1)[1]
-                            refs = client.get_references(api_id, limit=20)
+                            refs = client.get_references(api_id, limit=API_REFERENCE_LIMIT)
                             print(f"{indent}  {label} (from other sources): {len(refs)} references")
                             related.extend(refs)
                             break
@@ -173,7 +206,7 @@ class TreeBuilder:
                 s2_paper = self.s2.get_by_arxiv(paper.arxiv_id)
                 if s2_paper:
                     s2_id = s2_paper.id[3:]
-                    refs = self.s2.get_references(s2_id, limit=20)
+                    refs = self.s2.get_references(s2_id, limit=API_REFERENCE_LIMIT)
                     print(f"{indent}  S2 (via arXiv): {len(refs)} refs")
                     related.extend(refs)
             if not related and paper.title:
@@ -181,22 +214,15 @@ class TreeBuilder:
                     for found in client.search(paper.title, limit=3):
                         if titles_match(paper.title, found.title):
                             api_id = found.id.split(":", 1)[1]
-                            refs = client.get_references(api_id, limit=20)
+                            refs = client.get_references(api_id, limit=API_REFERENCE_LIMIT)
                             print(f"{indent}  {label} (via search): {len(refs)} refs")
                             related.extend(refs)
                             break
                     if related:
                         break
 
-        # If still no references, try a keyword search on arXiv (for local papers with no arXiv ID but a title)
-        if paper.title:
-            kw = " ".join(list(important_words(paper.title)))
-            if kw:
-                ax = self.arxiv.search(kw, max_results=10)
-                print(f"{indent}  arXiv search: {len(ax)}")
-                for p in ax:
-                    p.relation_type = "related"
-                related.extend(ax)
+        # NOTE: We intentionally do not add generic "related" papers in the
+        # reference tree. This tree should represent actual references only.
 
         if len(related) < 5 and local_refs:
             for ref in local_refs[:10]:
@@ -209,31 +235,40 @@ class TreeBuilder:
         # Score and filter candidates based on relevance to the current paper, 
         # and add the most relevant ones as children in the tree
         scored = self._score(paper, related)
-        filtered: list[tuple[Paper, float]] = []
+        filtered: list[tuple[Paper, float, float]] = []
 
         for p, sc in scored:
             if sc < self.min_rel:
+                drop_stats["below_relevance"] += 1
                 continue
 
             if self._is_same_paper(paper, p) or self._is_same_paper(tree.root, p):
+                drop_stats["self_or_root"] += 1
                 continue
 
             th = title_hash(p.title)
             if p.id in self.visited or th in self.title_hashes:
+                drop_stats["duplicate"] += 1
                 continue
 
             sim = compute_similarity(paper.abstract or paper.title, p.abstract or p.title)
 
-            if sim < self.min_rel:
+            if self.similarity_available and sim < self.min_rel:
+                drop_stats["below_similarity"] += 1
                 continue
+            if not self.similarity_available:
+                # Keep a stable signal for the renderer when semantic model is absent.
+                sim = min(1.0, sc)
 
             p.similarity_to_parent = sim
-            filtered.append((p, sc))
+            filtered.append((p, sc, sim))
             self.visited.add(p.id)
             self.title_hashes.add(th)
 
-        filtered.sort(key=lambda x: -x[1])
-        to_add = filtered[: min(8, self.max_papers - len(tree.papers))]
+        # Keep most semantically similar papers first; relevance score is tie-breaker.
+        filtered.sort(key=lambda x: (x[2], x[1]), reverse=True)
+        child_cap = min(MAX_CHILDREN_PER_NODE, self.max_papers - len(tree.papers))
+        to_add = filtered[:child_cap]
 
         if not to_add and related:
             best = max((sc for _, sc in scored), default=0)
@@ -241,15 +276,23 @@ class TreeBuilder:
                 f"{indent}  {len(related)} candidates scored, "
                 f"best={best:.3f}, threshold={self.min_rel} — none passed"
             )
+        elif related:
+            print(
+                f"{indent}  kept={len(to_add)}/{len(related)} "
+                f"(drop rel={drop_stats['below_relevance']}, "
+                f"sim={drop_stats['below_similarity']}, "
+                f"dup={drop_stats['duplicate']}, "
+                f"self={drop_stats['self_or_root']})"
+            )
 
-        for child, sc in to_add:
+        for child, sc, _sim in to_add:
             child.depth = paper.depth + 1
             child.parent_id = paper.id
             child.relevance_score = sc
             tree.papers[child.id] = child
             tree.edges.append((paper.id, child.id, child.relation_type))
 
-        for child, _ in to_add:
+        for child, _sc, _sim in to_add:
             if len(tree.papers) < self.max_papers:
                 self._expand_references(tree, child)
 
@@ -309,7 +352,7 @@ class TreeBuilder:
             
         return results
     
-    def _get_citations(self, paper: Paper, limit: int = 20) -> List[Paper]:
+    def _get_citations(self, paper: Paper, limit: int = API_CITATION_LIMIT) -> List[Paper]:
         citations: List[Paper] = []
 
         s2_id = None
@@ -328,41 +371,36 @@ class TreeBuilder:
                     s2_id = p.id.split(":", 1)[1]
                     break
         if s2_id:
-            try:
-                headers = {
-                    "User-Agent": "CitationTree/2.0"
-                }
-                r = requests.get(
-                    f"https://api.semanticscholar.org/graph/v1/paper/{s2_id}/citations",
-                    params={
-                        "limit": limit,
-                        "fields": "title,abstract,externalIds"
-                    },
-                    headers=headers,   
-                    timeout=20,
-                )
-                if r.status_code == 200:
-                    for item in r.json().get("data", []) or []:
-                        cited = item.get("citingPaper")
-                        if cited:
-                            temp = Paper(
-                                id=f"s2:{cited.get('paperId')}",
-                                title=cited.get("title"),
-                                abstract=cited.get("abstract"),
-                                arxiv_id=(cited.get("externalIds") or {}).get("ArXiv"),
-                                relation_type="citation",
-                            )
+            # Fetch all S2 citations so top-k is chosen from the full graph.
+            s2_citations = self.s2.get_citations(s2_id, limit=0)
+            citations.extend(s2_citations)
 
-                            enriched = self._lookup(temp.title, temp.arxiv_id)
+        oa_id = None
+        if paper.id.startswith("oa:"):
+            oa_id = paper.id.split(":", 1)[1]
+        elif paper.title:
+            for p in self.oa.search(paper.title, limit=3):
+                if titles_match(paper.title, p.title):
+                    oa_id = p.id.split(":", 1)[1]
+                    break
 
-                            if enriched:
-                                enriched.relation_type = "citation"
-                                citations.append(enriched)
-                            else:
-                                citations.append(temp)
-            except Exception as e:
-                print(f"  ⚠ citation fetch error: {e}")
-        return citations
+        if oa_id:
+            # Also pull all OA citations and merge for maximum coverage.
+            citations.extend(self.oa.get_citations(oa_id, limit=0))
+
+        dedup: list[Paper] = []
+        seen_ids: set[str] = set()
+        seen_titles: set[str] = set()
+        for p in citations:
+            if not p or not p.title:
+                continue
+            th = title_hash(p.title)
+            if p.id in seen_ids or th in seen_titles:
+                continue
+            seen_ids.add(p.id)
+            seen_titles.add(th)
+            dedup.append(p)
+        return dedup
 
 
     # Recursively expands the tree by looking up citations, scoring them, 
@@ -377,34 +415,132 @@ class TreeBuilder:
         related = self._get_citations(paper)
         print(f"{indent}  Found {len(related)} citations")
 
-        to_add = []
+        if DEBUG_PRINT_ALL_CITERS and related:
+            print(f"{indent}  All citing-paper candidates for parent:")
+            print(f"{indent}    parent={paper.title} ({paper.year or 'unknown'})")
+            for idx, cand in enumerate(related, start=1):
+                print(
+                    f"{indent}    [{idx}] year={cand.year or 'unknown'} "
+                    f"src={cand.source} cites={cand.citations_count or 0} "
+                    f"id={cand.id} title={cand.title}"
+                )
+
+        # Keep displayed citation count consistent with fetched citation neighbors.
+        if related:
+            paper.citations_count = max(paper.citations_count or 0, len(related))
+
+        to_add: list[tuple[Paper, float, float]] = []
+        drop_stats = {
+            "self_or_root": 0,
+            "duplicate": 0,
+            "invalid": 0,
+            "older_than_parent": 0,
+        }
+        drop_details: list[str] = []
+
+        relevance_by_id = {
+            p.id: sc for p, sc in self._score(paper, related)
+        }
 
         for p in related:
             if not p or not p.title:
+                drop_stats["invalid"] += 1
+                if DEBUG_PRINT_ALL_CITERS:
+                    drop_details.append("drop=invalid title")
                 continue
 
             if self._is_same_paper(paper, p) or self._is_same_paper(tree.root, p):
+                drop_stats["self_or_root"] += 1
+                if DEBUG_PRINT_ALL_CITERS:
+                    drop_details.append(
+                        f"drop=self/root id={p.id} year={p.year or 'unknown'} title={p.title}"
+                    )
+                continue
+
+            # Citing papers should not be older than the cited paper.
+            if (
+                paper.year is not None
+                and p.year is not None
+                and p.year < paper.year
+            ):
+                drop_stats["older_than_parent"] += 1
+                if DEBUG_PRINT_ALL_CITERS:
+                    drop_details.append(
+                        f"drop=older_than_parent id={p.id} year={p.year} parent_year={paper.year} title={p.title}"
+                    )
                 continue
 
             th = title_hash(p.title)
             if p.id in self.visited or th in self.title_hashes:
+                drop_stats["duplicate"] += 1
+                if DEBUG_PRINT_ALL_CITERS:
+                    drop_details.append(
+                        f"drop=duplicate id={p.id} year={p.year or 'unknown'} title={p.title}"
+                    )
                 continue
 
             p.depth = paper.depth + 1
             p.parent_id = paper.id
-            p.relevance_score = 1.0  
-            p.similarity_to_parent = compute_similarity(
+            sim = compute_similarity(
                 paper.abstract or paper.title,
                 p.abstract or p.title
             )
 
-            to_add.append(p)
+            # If semantic model is missing, use heuristic relevance as fallback ranking signal.
+            if not self.similarity_available:
+                sim = relevance_by_id.get(p.id, 0.0)
+
+            p.relevance_score = relevance_by_id.get(p.id, 0.0)
+            p.similarity_to_parent = sim
+
+            to_add.append((p, p.relevance_score, sim))
             self.visited.add(p.id)
             self.title_hashes.add(th)
 
-        to_add = to_add[:8]
+            if DEBUG_PRINT_ALL_CITERS:
+                print(
+                    f"{indent}    keep-candidate year={p.year or 'unknown'} "
+                    f"sim={sim:.3f} rel={p.relevance_score:.3f} "
+                    f"cites={p.citations_count or 0} id={p.id} title={p.title}"
+                )
 
-        for child in to_add:
+        # Prefer oldest valid citing papers first to avoid recency-skewed
+        # citation pages (e.g., many same-year fresh uploads), then break ties
+        # by semantic similarity/relevance.
+        candidate_pool = to_add
+        candidate_pool.sort(
+            key=lambda x: (
+                x[0].year if x[0].year is not None else 9999,
+                -x[2],
+                -x[1],
+            )
+        )
+        child_cap = min(MAX_CHILDREN_PER_NODE, self.max_papers - len(tree.papers))
+        to_add = candidate_pool[:child_cap]
+        if related:
+            selected_years = [str(c.year) for c, _sc, _sim in to_add if c.year is not None]
+            print(
+                f"{indent}  kept={len(to_add)}/{len(related)} "
+                f"(drop dup={drop_stats['duplicate']}, "
+                f"self={drop_stats['self_or_root']}, "
+                f"older={drop_stats['older_than_parent']})"
+            )
+            if selected_years:
+                print(f"{indent}  selected citation years: {', '.join(selected_years)}")
+            if DEBUG_PRINT_ALL_CITERS:
+                print(f"{indent}  Final selected top-{len(to_add)} (ranked):")
+                for rank, (c, sc, sim) in enumerate(to_add, start=1):
+                    print(
+                        f"{indent}    #{rank} year={c.year or 'unknown'} "
+                        f"sim={sim:.3f} rel={sc:.3f} cites={c.citations_count or 0} "
+                        f"id={c.id} title={c.title}"
+                    )
+                if drop_details:
+                    print(f"{indent}  Dropped candidates ({len(drop_details)}):")
+                    for line in drop_details:
+                        print(f"{indent}    {line}")
+
+        for child, _sc, _sim in to_add:
             tree.papers[child.id] = child
             tree.edges.append((paper.id, child.id, "citation"))
             self._expand_citations(tree, child)
