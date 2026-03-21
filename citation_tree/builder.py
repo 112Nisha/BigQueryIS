@@ -76,10 +76,13 @@ class TreeBuilder:
         if not self.similarity_available:
             print("  Similarity model unavailable: semantic filter disabled")
 
+      
         root = self._lookup(title, arxiv_id)
 
+
         if root:
-            pass  
+            if info["abstract"]:
+                root.abstract = info["abstract"]
         else:
             root = Paper(
                 id=f"local:{hashlib.md5(title.encode()).hexdigest()[:12]}",
@@ -105,7 +108,7 @@ class TreeBuilder:
             if local_path:
                 extracted = extract_pdf(local_path)
                 paper.full_text = extracted.get("text") or ""
-                if not paper.abstract and extracted.get("abstract"):
+                if extracted.get("abstract"):
                     paper.abstract = extracted["abstract"]
                 return paper, f"{len(paper.full_text)} chars"
             return paper, "no PDF"
@@ -165,6 +168,7 @@ class TreeBuilder:
                 for p in client.search(title, limit=3):
                     if titles_match(title, p.title):
                         return p
+
         return None
 
     # Recursively expands the tree by looking up references and related papers, scoring them, 
