@@ -293,8 +293,8 @@ def _generate_with_gemini(client, parent: Paper, child: Paper, parent_text: str,
     prompt = (
         "You are an expert academic reviewer.\n\n"
         "Below are structured summaries of two research papers:\n"
-        "- A parent paper (the citing paper)\n"
-        "- A child paper (the cited paper)\n\n"
+        "- A parent paper (the newer paper that cites the child paper)\n"
+        "- A child paper (the referenced prior work)\n\n"
         "Using ONLY the information provided, explain:\n\n"
         "1. Which specific ideas, methods, or findings from the child paper "
         "influenced the parent paper.\n"
@@ -337,8 +337,8 @@ def _generate_with_gemini_citations(client, parent: Paper, child: Paper, parent_
     prompt = (
         "You are an expert academic reviewer.\n\n"
         "Below are structured summaries of two research papers:\n"
-        "- A parent paper (the cited paper)\n"
-        "- A child paper (the citing paper)\n\n"
+        "- A parent paper (the cited paper / prior work)\n"
+        "- A child paper (the newer citing paper)\n\n"
         "Using ONLY the information provided, explain:\n\n"
         "1. Which specific ideas, methods, or findings from the parent paper "
         "influenced the child paper.\n"

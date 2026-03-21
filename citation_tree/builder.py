@@ -390,14 +390,12 @@ class TreeBuilder:
         def _fetch_s2() -> list[Paper]:
             if not s2_id:
                 return []
-            # Fetch all S2 citations so top-k is chosen from the full graph.
-            return self.s2.get_citations(s2_id, limit=0)
+            return self.s2.get_citations(s2_id, limit=limit)
 
         def _fetch_oa() -> list[Paper]:
             if not oa_id:
                 return []
-            # Also pull all OA citations and merge for maximum coverage.
-            return self.oa.get_citations(oa_id, limit=0)
+            return self.oa.get_citations(oa_id, limit=limit)
 
         with ThreadPoolExecutor(max_workers=MAX_FETCH_WORKERS) as ex:
             s2_future = ex.submit(_fetch_s2)
@@ -448,6 +446,8 @@ class TreeBuilder:
 
         to_add: list[tuple[Paper, float, float]] = []
         drop_stats = {
+            "below_relevance": 0,
+            "below_similarity": 0,
             "self_or_root": 0,
             "duplicate": 0,
             "invalid": 0,
@@ -464,6 +464,15 @@ class TreeBuilder:
                 drop_stats["invalid"] += 1
                 if DEBUG_PRINT_ALL_CITERS:
                     drop_details.append("drop=invalid title")
+                continue
+
+            rel_score = relevance_by_id.get(p.id, 0.0)
+            if rel_score < self.min_rel:
+                drop_stats["below_relevance"] += 1
+                if DEBUG_PRINT_ALL_CITERS:
+                    drop_details.append(
+                        f"drop=below_relevance id={p.id} rel={rel_score:.3f} title={p.title}"
+                    )
                 continue
 
             if self._is_same_paper(paper, p) or self._is_same_paper(tree.root, p):
@@ -505,9 +514,17 @@ class TreeBuilder:
 
             # If semantic model is missing, use heuristic relevance as fallback ranking signal.
             if not self.similarity_available:
-                sim = relevance_by_id.get(p.id, 0.0)
+                sim = rel_score
 
-            p.relevance_score = relevance_by_id.get(p.id, 0.0)
+            if self.similarity_available and sim < self.min_rel:
+                drop_stats["below_similarity"] += 1
+                if DEBUG_PRINT_ALL_CITERS:
+                    drop_details.append(
+                        f"drop=below_similarity id={p.id} sim={sim:.3f} title={p.title}"
+                    )
+                continue
+
+            p.relevance_score = rel_score
             p.similarity_to_parent = sim
 
             to_add.append((p, p.relevance_score, sim))
@@ -538,7 +555,9 @@ class TreeBuilder:
             selected_years = [str(c.year) for c, _sc, _sim in to_add if c.year is not None]
             print(
                 f"{indent}  kept={len(to_add)}/{len(related)} "
-                f"(drop dup={drop_stats['duplicate']}, "
+                f"(drop rel={drop_stats['below_relevance']}, "
+                f"sim={drop_stats['below_similarity']}, "
+                f"dup={drop_stats['duplicate']}, "
                 f"self={drop_stats['self_or_root']}, "
                 f"older={drop_stats['older_than_parent']})"
             )
