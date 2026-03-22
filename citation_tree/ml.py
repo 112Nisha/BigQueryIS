@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 import hashlib
 import time as _time
+import threading
 from numpy import dot
 from openai import OpenAI
 import re
@@ -34,9 +35,15 @@ rate_limiter = RateLimiter(1.2)
 _cache = Cache(ttl_days=30)
 
 _similarity_model = None
-_llm_client = None
-_llm_calls_used = 0
-_llm_budget_exhausted = False
+_thread_state = threading.local()
+
+
+def _state() -> threading.local:
+    if not hasattr(_thread_state, "llm_client"):
+        _thread_state.llm_client = None
+        _thread_state.llm_calls_used = 0
+        _thread_state.llm_budget_exhausted = False
+    return _thread_state
 
 
 def llm_explanations_enabled() -> bool:
@@ -44,7 +51,8 @@ def llm_explanations_enabled() -> bool:
 
 
 def _budget_remaining() -> int:
-    return max(0, MAX_LLM_CALLS_PER_RUN - _llm_calls_used)
+    st = _state()
+    return max(0, MAX_LLM_CALLS_PER_RUN - st.llm_calls_used)
 
 
 def _pair_key(parent_id: str, child_id: str, is_reference: bool) -> str:
@@ -58,15 +66,15 @@ def _summary_key(paper_id: str, text: str) -> str:
 
 
 def _get_client() -> OpenAI | None:
-    global _llm_client
+    st = _state()
     if not llm_explanations_enabled():
         return None
-    if _llm_client is None:
-        _llm_client = OpenAI(
+    if st.llm_client is None:
+        st.llm_client = OpenAI(
             api_key=GROQ_API_KEY,
             base_url="https://api.groq.com/openai/v1",
         )
-    return _llm_client
+    return st.llm_client
 
 
 def _select_text_for_summary(paper: Paper) -> str:
@@ -134,10 +142,10 @@ def _summarize_paper(client, paper_text: str) -> str:
     return _call_llm(client, summary_prompt, max_output_tokens=500)
 
 def _call_llm(client, prompt, max_output_tokens=600):
-    global _llm_calls_used, _llm_budget_exhausted
+    st = _state()
 
-    if _llm_budget_exhausted or _budget_remaining() <= 0:
-        _llm_budget_exhausted = True
+    if st.llm_budget_exhausted or _budget_remaining() <= 0:
+        st.llm_budget_exhausted = True
         return ""
 
     MAX_PROMPT_CHARS = 12000
@@ -147,7 +155,7 @@ def _call_llm(client, prompt, max_output_tokens=600):
     for attempt in range(3):
         try:
             rate_limiter.wait()
-            _llm_calls_used += 1
+            st.llm_calls_used += 1
 
             response = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
@@ -175,10 +183,10 @@ def _call_llm(client, prompt, max_output_tokens=600):
             msg = " ".join(str(exc).splitlines())[:120]
             low = msg.lower()
             if "rate" in low and "limit" in low:
-                _llm_budget_exhausted = True
+                st.llm_budget_exhausted = True
                 return ""
             if "quota" in low or "insufficient" in low:
-                _llm_budget_exhausted = True
+                st.llm_budget_exhausted = True
                 return ""
             _time.sleep(3 * (attempt + 1))
 
@@ -223,6 +231,7 @@ def trim_to_last_sentence(text: str) -> str:
 # Generates an explanation of how the parent extends/improves on the child, using the Gemini API if available, 
 # or returning an empty string if not.
 def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: bool) -> str:
+    st = _state()
     if not llm_explanations_enabled():
         return ""
 
@@ -231,7 +240,7 @@ def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: 
     if cached_exp:
         return cached_exp
 
-    if _llm_budget_exhausted or _budget_remaining() <= 0:
+    if st.llm_budget_exhausted or _budget_remaining() <= 0:
         return ""
 
     parent_text = _select_text_for_summary(parent)

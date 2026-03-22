@@ -131,6 +131,19 @@ class TreeBuilder:
                 paper.similarity_to_parent = compute_similarity(parent.abstract or parent.title, paper.abstract or paper.title,)
                 paper.improvement = generate_improvement_explanation(parent, paper, is_reference)
 
+    @staticmethod
+    def _is_open_access_candidate(paper: Paper) -> bool:
+        """Keep DOI papers only when we have an explicit open-access signal."""
+        if paper.arxiv_id:
+            return True
+        if paper.is_open_access is True:
+            return True
+        if paper.pdf_url:
+            return True
+        if paper.doi:
+            return False
+        return True
+
     # Builds the citation tree from a given pdf by extracting information for the root of the tree
     # and then expanding the tree iteratively by looking up references and related papers via APIs, 
     # scoring them for relevance, and adding the most relevant ones as child nodes.
@@ -187,6 +200,7 @@ class TreeBuilder:
             "self_or_root": 0,
             "duplicate": 0,
             "invalid": 0,
+            "closed_access": 0,
         }
 
         # checking multiple APIs for references, starting with the most specific (S2 and OA with ID) 
@@ -258,6 +272,10 @@ class TreeBuilder:
                 drop_stats["self_or_root"] += 1
                 continue
 
+            if not self._is_open_access_candidate(p):
+                drop_stats["closed_access"] += 1
+                continue
+
             th = title_hash(p.title)
             if p.id in self.visited or th in self.title_hashes:
                 drop_stats["duplicate"] += 1
@@ -294,7 +312,8 @@ class TreeBuilder:
                 f"(drop rel={drop_stats['below_relevance']}, "
                 f"sim={drop_stats['below_similarity']}, "
                 f"dup={drop_stats['duplicate']}, "
-                f"self={drop_stats['self_or_root']})"
+                f"self={drop_stats['self_or_root']}, "
+                f"closed={drop_stats['closed_access']})"
             )
 
         for child, sc, _sim in to_add:
@@ -456,6 +475,7 @@ class TreeBuilder:
             "duplicate": 0,
             "invalid": 0,
             "older_than_parent": 0,
+            "closed_access": 0,
         }
         drop_details: list[str] = []
 
@@ -484,6 +504,14 @@ class TreeBuilder:
                 if DEBUG_PRINT_ALL_CITERS:
                     drop_details.append(
                         f"drop=self/root id={p.id} year={p.year or 'unknown'} title={p.title}"
+                    )
+                continue
+
+            if not self._is_open_access_candidate(p):
+                drop_stats["closed_access"] += 1
+                if DEBUG_PRINT_ALL_CITERS:
+                    drop_details.append(
+                        f"drop=closed_access id={p.id} doi={p.doi or 'unknown'} title={p.title}"
                     )
                 continue
 
@@ -563,7 +591,8 @@ class TreeBuilder:
                 f"sim={drop_stats['below_similarity']}, "
                 f"dup={drop_stats['duplicate']}, "
                 f"self={drop_stats['self_or_root']}, "
-                f"older={drop_stats['older_than_parent']})"
+                f"older={drop_stats['older_than_parent']}, "
+                f"closed={drop_stats['closed_access']})"
             )
             if selected_years:
                 print(f"{indent}  selected citation years: {', '.join(selected_years)}")

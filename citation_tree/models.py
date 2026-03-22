@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import re
-from citation_tree.ml import trim_to_last_sentence  
 
 # A single academic paper with metadata and fields for tree position and similarity score (relevance to parent)
 @dataclass
@@ -20,6 +19,7 @@ class Paper:
     citations_count: int = 0
     arxiv_id: Optional[str] = None
     doi: Optional[str] = None
+    is_open_access: Optional[bool] = None
     url: Optional[str] = None
     pdf_url: Optional[str] = None
     categories: List[str] = field(default_factory=list)
@@ -59,13 +59,12 @@ class Paper:
             "title": self._clean_latex(self.title),
             "authors": self.authors,
             "year": self.year,
-            "abstract": self._clean_latex(
-                trim_to_last_sentence((self.abstract or "")[:2000])
-            ),
+            "abstract": self._clean_latex(self.abstract or ""),
             "venue": self.venue,
             "citations_count": self.citations_count,
             "arxiv_id": self.arxiv_id,
             "doi": self.doi,
+            "is_open_access": self.is_open_access,
             "url": self.url,
             "pdf_url": self.pdf_url,
             "categories": self.categories,

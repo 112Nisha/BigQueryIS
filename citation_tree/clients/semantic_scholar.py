@@ -13,7 +13,7 @@ from citation_tree.models import Paper
 class S2Client(BaseClient):
     _F = (
         "paperId,title,authors,year,abstract,venue,citationCount,"
-        "externalIds,fieldsOfStudy,url,openAccessPdf"
+        "externalIds,fieldsOfStudy,url,openAccessPdf,isOpenAccess"
     )
 
     def __init__(self, cache: Cache):
@@ -137,6 +137,7 @@ class S2Client(BaseClient):
             citations_count=d.get("citationCount", 0) or 0,
             arxiv_id=axid,
             doi=ext.get("DOI"),
+            is_open_access=bool(d.get("isOpenAccess")) or bool(pdf) or bool(axid),
             url=d.get("url"),
             pdf_url=pdf,
             categories=d.get("fieldsOfStudy") or [],

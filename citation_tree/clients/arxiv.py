@@ -102,6 +102,7 @@ class ArxivClient(BaseClient):
                         year=year,
                         abstract=abstract,
                         arxiv_id=aid,
+                        is_open_access=True,
                         url=f"https://arxiv.org/abs/{aid}",
                         pdf_url=f"https://arxiv.org/pdf/{aid}.pdf",
                         categories=cats,

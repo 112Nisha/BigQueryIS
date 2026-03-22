@@ -156,6 +156,7 @@ class OAClient(BaseClient):
             d["doi"].replace("https://doi.org/", "") if d.get("doi") else None
         )
         pdf = (d.get("open_access") or {}).get("oa_url")
+        is_oa = (d.get("open_access") or {}).get("is_oa")
         loc = d.get("primary_location") or {}
         venue = (
             loc.get("source", {}).get("display_name")
@@ -176,6 +177,7 @@ class OAClient(BaseClient):
             venue=venue,
             citations_count=d.get("cited_by_count", 0) or 0,
             doi=doi,
+            is_open_access=bool(is_oa) or bool(pdf),
             pdf_url=pdf,
             categories=cats,
             source="openalex",
