@@ -80,7 +80,9 @@ class Paper:
         }
 
 
-# A rooted tree of papers connected by citation / reference edges
+# A rooted tree of papers connected by citation/reference edges.
+# The tree has a dictionary mapping paper IDs to Paper objects, and a list of edges
+# where each edge is a (source_id, target_id, relation_type) tuple ("reference" or "citation"), converted to dictionaries
 @dataclass
 class CitationTree:
 

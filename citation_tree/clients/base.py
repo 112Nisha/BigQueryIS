@@ -8,9 +8,8 @@ from citation_tree.cache import Cache, GlobalRequestGate
 from citation_tree.config import RATE_LIMIT
 from citation_tree.models import Paper
 
-
+# parent class for the API clients
 class BaseClient:
-    """Common infrastructure inherited by every API-specific client."""
 
     def __init__(
         self,
@@ -24,7 +23,8 @@ class BaseClient:
         self.session = requests.Session()
         if headers:
             self.session.headers.update(headers)
-
+    
+    # makes a GET request to the given url
     def _get(self, url: str, *, params: dict | None = None, timeout: int = 30):
         return GlobalRequestGate.request(
             self.session,
@@ -36,12 +36,9 @@ class BaseClient:
             timeout=timeout,
         )
 
+    # retrieves a value from the cache, returns None if not found or on error - if
+    # multi is True, expects/returns a list of papers and converts them from dicts; otherwise, expects/returns a single paper or None
     def _request(self, key: str, fetch, label: str, multi: bool = True):
-        """Fetch with cache-first semantics.
-
-        *multi=True*  → expects/returns a list of Papers.
-        *multi=False* → expects/returns a single Paper or None.
-        """
         cached = self.cache.get(key)
         if cached is not None:
             return (
@@ -64,6 +61,7 @@ class BaseClient:
             print(f"  ⚠ {label}: {e}")
         return [] if multi else None
 
+    # converts a paper into a dictionary for caching
     @staticmethod
     def _from_paper(p: Paper) -> dict:
         return {
@@ -84,6 +82,7 @@ class BaseClient:
             "relation_type": p.relation_type,
         }
 
+    # converts a dictonary into a paper
     @staticmethod
     def _to_paper(d: dict) -> Paper:
         p = Paper(

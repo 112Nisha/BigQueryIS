@@ -16,14 +16,14 @@ ARXIV_API = "http://export.arxiv.org/api/query"
 OPENALEX_API = "https://api.openalex.org"
 
 # Default input — change this to any file inside pdfs/
-INPUT_PDF = os.path.join(PDFS_DIR, "1706.03762v7.pdf")
+INPUT_PDF = os.path.join(PDFS_DIR, "0709.1598v4.pdf")
 
 # Tree parameters
 MAX_DEPTH = 2
-MAX_PAPERS = 40
+MAX_PAPERS = 30
 MIN_RELEVANCE = 0.15
 # Root -> top_k children -> each child -> top_k children (when MAX_DEPTH=2)
-MAX_CHILDREN_PER_NODE = 4
+MAX_CHILDREN_PER_NODE = 10
 
 # Per-node retrieval breadth (higher values improve coverage but cost more API calls)
 API_REFERENCE_LIMIT = 50
@@ -34,13 +34,13 @@ RATE_LIMIT = 1.2
 
 # LLM controls (Groq/OpenAI-compatible usage in ml.py)
 LLM_EXPLANATIONS_ENABLED = True
-MAX_LLM_CALLS_PER_RUN = 40
+MAX_LLM_CALLS_PER_RUN = 1000
 MAX_TEXT_CHARS_FOR_SUMMARY = 10000
 SUMMARY_CHUNK_SIZE = 5000
-MAX_SUMMARY_CHUNKS = 2
+MAX_SUMMARY_CHUNKS = 30
 
 # Debugging
-DEBUG_PRINT_ALL_CITERS = True
+DEBUG_PRINT_ALL_CITERS = False
 
 # Performance
 MAX_FETCH_WORKERS = 2

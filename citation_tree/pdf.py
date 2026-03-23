@@ -19,9 +19,10 @@ tika.initVM()
 # Tika server startup/parsing can race across threads; serialize parser calls.
 _TIKA_LOCK = Lock()
 
+# Used for paper ids - checks if the id is of the form of an arxiv id
 _ARXIV_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?", re.I)
 
-
+# Cleans the arxiv id by extracting the base and version and normalizing it to a standard format 
 def normalize_arxiv_id(arxiv_id: str | None) -> str | None:
     if not arxiv_id:
         return None
@@ -33,8 +34,8 @@ def normalize_arxiv_id(arxiv_id: str | None) -> str | None:
     return f"{base}{version}"
 
 
+# gets the latest version of an arxiv id by querying the arxiv API with the base and getting the latest version 
 def resolve_latest_arxiv_id(arxiv_id: str | None) -> str | None:
-    """Resolve an arXiv id (base or versioned) to the latest available version."""
     normalized = normalize_arxiv_id(arxiv_id)
     if not normalized:
         return None
@@ -59,12 +60,8 @@ def resolve_latest_arxiv_id(arxiv_id: str | None) -> str | None:
         pass
     return normalized
 
-
+# replacing the current version of the pdf with the latest version by downloading the latest version
 def ensure_latest_pdf_path(filepath: str, rate_limit: float = 1.2) -> str:
-    """If *filepath* maps to an arXiv paper, return local path to the latest PDF.
-
-    Falls back to the original filepath when latest resolution/download fails.
-    """
     if not os.path.exists(filepath):
         return filepath
 
@@ -119,7 +116,8 @@ def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
     elif latest_arxiv_id:
         url = f"https://arxiv.org/pdf/{latest_arxiv_id}.pdf"
 
-    # using title to search arxiv api
+
+    # using title to search arxiv api and get the first valid result
     elif getattr(paper, "title", None):
         try:
             query = paper.title.replace(" ", "+")
@@ -144,6 +142,7 @@ def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
 
         except Exception as e:
             print(f"  arXiv search failed: {e}")
+    
 
     if not url:
         print(f"  No PDF available for: {paper.title[:60]}")
@@ -202,6 +201,7 @@ def extract_pdf(filepath: str) -> dict:
         text = parsed.get("content", "") or ""
         meta = parsed.get("metadata", {}) or {}
         temp_abstract = _extract_abstract(text) or ""
+
     except Exception as e:
         print(f"  PDF extraction error: {e}")
         return {
@@ -223,9 +223,16 @@ def extract_pdf(filepath: str) -> dict:
 # Extracts title from PDF text and metadata
 def _extract_title(text: str, meta: dict) -> str | None:
     for k in ("dc:title", "title", "Title", "pdf:docinfo:title"):
+        # making sure the title isn't of the form arXiv:1009.0288v1, isn't too short or too generic
         if meta.get(k) and len(str(meta[k]).strip()) > 5:
             title = str(meta[k]).strip()
-            if title.lower() not in ("untitled", "document", "microsoft word"):
+            if (
+            len(title) > 5
+            and title.lower() not in ("untitled", "document", "microsoft word")
+            and not re.match(r"^arxiv:\d{4}\.\d{4,5}", title, re.I)
+            and not re.match(r"^\d{4}\.\d{4,5}", title)  
+            and "[" not in title  
+        ):
                 return title
     
     candidates = []

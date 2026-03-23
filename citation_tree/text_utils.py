@@ -13,7 +13,7 @@ _STOP_WORDS = frozenset(
     "approach method methods results paper study".split()
 )
 
-# Returns a set of meaningful lowercase words (≥3 chars, no stop words)
+# Returns a set of meaningful lowercase words (>=3 chars, no stop words)
 def important_words(text: str) -> Set[str]:
     if not text:
         return set()
@@ -21,7 +21,7 @@ def important_words(text: str) -> Set[str]:
         w for w in re.findall(r"\b[a-z]{3,}\b", text.lower()) if w not in _STOP_WORDS
     }
 
-# Short hash of a title's important words — used for deduplication
+# Short hash of a title's important words - used for deduplication
 def title_hash(title: str) -> str:
     return hashlib.md5(
         " ".join(sorted(important_words(title))[:8]).encode()

@@ -11,7 +11,7 @@ from typing import Any
 
 from citation_tree.config import CACHE_DIR, GLOBAL_HTTP_MAX_CONCURRENCY, RATE_LIMIT
 
-# Cile-system cache keyed by MD5 hash of a string key
+# File-system cache keyed by MD5 hash of a string key
 class Cache:
 
     def __init__(self, directory: str = CACHE_DIR, ttl_days: int = 7):
@@ -19,11 +19,13 @@ class Cache:
         self.ttl = ttl_days * 86400
         self._lock = Lock()
 
+    # creating a file path by hashing the key
     def _path(self, key: str) -> str:
         return os.path.join(
             self.dir, hashlib.md5(key.encode()).hexdigest() + ".json"
         )
-
+    
+    # retrieves a value from the cache if ti exists and if it's not expired
     def get(self, key: str) -> Any | None:
         p = self._path(key)
         if not os.path.exists(p):
@@ -38,6 +40,7 @@ class Cache:
             pass
         return None
 
+    # adds a value to the cache with the current timestamp
     def set(self, key: str, value: Any):
         try:
             with self._lock:
@@ -52,7 +55,8 @@ class RateLimiter:
     def __init__(self, interval: float = RATE_LIMIT):
         self.interval = interval
         self.last = 0.0
-
+    
+    # waits until the minimum interval has passed since the last call
     def wait(self):
         delta = time.time() - self.last
         if delta < self.interval:
@@ -60,13 +64,14 @@ class RateLimiter:
         self.last = time.time()
 
 
+# global gate to limit total concurrency and rate of all HTTP requests across the app, to avoid overwhelming APIs or hitting local resource limits
 class GlobalRequestGate:
-    """Global HTTP concurrency + per-group min-interval throttling."""
 
     _sem = BoundedSemaphore(max(1, GLOBAL_HTTP_MAX_CONCURRENCY))
     _lock = Lock()
     _last_by_group: dict[str, float] = {}
-
+    
+    # ensures that calls to the same API group are spaced out by at least min_interval seconds
     @classmethod
     def _wait_group_interval(cls, group: str, min_interval: float):
         if min_interval <= 0:
@@ -79,18 +84,10 @@ class GlobalRequestGate:
                 time.sleep(delay)
                 now = time.time()
             cls._last_by_group[group] = now
-
+    
+    # waits if there are too many concurrent requests, and ensures that calls to the same API group are spaced out by at least min_interval seconds
     @classmethod
-    def request(
-        cls,
-        http_client,
-        method: str,
-        url: str,
-        *,
-        group: str,
-        min_interval: float,
-        **kwargs,
-    ):
+    def request(cls, http_client, method: str, url: str, *, group: str, min_interval: float, **kwargs,):
         cls._sem.acquire()
         try:
             cls._wait_group_interval(group, min_interval)

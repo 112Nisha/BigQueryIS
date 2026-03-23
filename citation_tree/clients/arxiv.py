@@ -16,7 +16,8 @@ class ArxivClient(BaseClient):
     def __init__(self, cache: Cache):
         super().__init__(cache, rate=GLOBAL_ARXIV_MIN_INTERVAL)
         self.rate_group = "arxiv"
-
+    
+    # searches arxiv for papers matching the query, returns a list of papers, in this code, the query is usually a paper title
     def search(self, query: str, max_results: int = 10) -> List[Paper]:
         def fetch():
             q = " ".join(re.sub(r"[^\w\s]", " ", query).split()[:15])
@@ -35,7 +36,8 @@ class ArxivClient(BaseClient):
         return self._request(
             f"ax:s:{query}:{max_results}", fetch, "arXiv search"
         )
-
+ 
+    # looks up a paper by its arxiv id
     def get_by_id(self, arxiv_id: str) -> Paper | None:
         def fetch():
             cid = re.sub(r"v\d+$", "", arxiv_id)
@@ -50,7 +52,8 @@ class ArxivClient(BaseClient):
         return self._request(
             f"ax:i:{arxiv_id}", fetch, "arXiv lookup", multi=False
         )
-
+    
+    # converts XML response to a list of papers because arxiv returns XML
     def _parse(self, xml: str) -> List[Paper]:
         papers: List[Paper] = []
         try:

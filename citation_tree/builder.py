@@ -1,4 +1,40 @@
 """Tree builder — orchestrates PDF extraction, API discovery, and ML scoring."""
+# How tree creation works:
+#
+# 1. Start with the root PDF:
+#    - We extract its title, abstract, full text, and references using extract_pdf().
+#
+# 2. Try to identify the root paper via APIs (_lookup):
+#    - If found, we use the API version (has IDs, citations, etc.).
+#    - If not, we create a local Paper object using extracted PDF info.
+#
+# 3. Build the tree structure:
+#    - For each paper, we fetch related papers (references or citations) using APIs.
+#    - At this stage, we use metadata (title, abstract, IDs) — no PDFs yet.
+#
+# 4. Score and filter candidates:
+#    - We compute a cheap "relevance score" (keyword overlap, categories, etc.).
+#    - We drop bad matches (low relevance, duplicates, wrong year, etc.).
+#    - Then we compute semantic similarity (more expensive, more accurate).
+#    - Only the best papers are kept as children.
+#
+# 5. Add children to the tree:
+#    - Each selected paper becomes a node.
+#    - We store parent-child relationships as edges.
+#    - Then we recursively expand each child (until depth/size limits are hit).
+#
+# 6. Postprocess:
+#    - Now that we have a smaller, relevant tree, we download PDFs only for those papers.
+#    - We extract full text and better abstracts using extract_pdf().
+#
+# 7. Final enhancements:
+#    - Compute semantic similarity between parent and child papers.
+#    - Generate LLM-based explanations of how papers relate/improve on each other.
+#
+# Result:
+#    - A tree of papers (nodes) connected by references/citations (edges),
+#    - built efficiently using APIs first, then enriched with PDFs only for important papers.
+# Note: semantic scholar arxiv and open alex are used for extracting references and citations, and arxiv is used for downloading the pdfs
 
 from __future__ import annotations
 
@@ -53,7 +89,8 @@ class TreeBuilder:
 
         self.visited: Set[str] = set()
         self.title_hashes: Set[str] = set()
-
+    
+    # creates the root of the tree
     def _prepare_root(self, pdf_path: str) -> Paper:
         print(f"\n{'=' * 60}\n  Citation Tree Builder\n{'=' * 60}")
         latest_pdf_path = ensure_latest_pdf_path(pdf_path, rate_limit=RATE_LIMIT)
@@ -66,7 +103,6 @@ class TreeBuilder:
 
         print(f"\n  Extracting: {os.path.basename(pdf_path)}")
         info = extract_pdf(pdf_path)
-
         title = info["title"] or "Unknown Paper"
         arxiv_id = info["arxiv_id"]
         print(f"  Title : {title}")
@@ -81,8 +117,7 @@ class TreeBuilder:
 
 
         if root:
-            if info["abstract"]:
-                root.abstract = info["abstract"]
+            pass
         else:
             root = Paper(
                 id=f"local:{hashlib.md5(title.encode()).hexdigest()[:12]}",
@@ -93,16 +128,19 @@ class TreeBuilder:
                 source="local",
             )
         # Always apply the locally-extracted PDF text to the root paper, even when
-        # _lookup succeeded and returned an API paper (which has no full_text).
+        # _lookup succeeded and returned an API paper (which has no full_text)
         if not root.full_text and info["text"]:
             root.full_text = info["text"]
         root.depth = 0
         return root, info
     
+    # after building the tree, downloads PDFs for all papers in the tree, extracts their text, 
+    # and generates improvement explanations using the LLM
     def _postprocess(self, tree: CitationTree, is_reference: bool) -> None:
         print("\n  Downloading PDFs and extracting full text")
         papers_to_process = [p for p in tree.papers.values() if not p.full_text]
-
+        
+        # downloads and extracts the full text for a paper
         def _hydrate_full_text(paper: Paper) -> tuple[Paper, str]:
             local_path = download_pdf(paper, PDFS_DIR, rate_limit=RATE_LIMIT)
             if local_path:
@@ -130,10 +168,10 @@ class TreeBuilder:
                 parent = tree.papers[paper.parent_id]
                 paper.similarity_to_parent = compute_similarity(parent.abstract or parent.title, paper.abstract or paper.title,)
                 paper.improvement = generate_improvement_explanation(parent, paper, is_reference)
-
+    
+    # returns whether the paper should be considered (doi papers are normally paywalled or closed off)
     @staticmethod
     def _is_open_access_candidate(paper: Paper) -> bool:
-        """Keep DOI papers only when we have an explicit open-access signal."""
         if paper.arxiv_id:
             return True
         if paper.is_open_access is True:
@@ -144,7 +182,7 @@ class TreeBuilder:
             return False
         return True
 
-    # Builds the citation tree from a given pdf by extracting information for the root of the tree
+    # Builds the reference tree from a given pdf by extracting information for the root of the tree
     # and then expanding the tree iteratively by looking up references and related papers via APIs, 
     # scoring them for relevance, and adding the most relevant ones as child nodes.
     def build_reference_tree(self, pdf_path: str) -> CitationTree:
@@ -157,6 +195,9 @@ class TreeBuilder:
         self._postprocess(tree, is_reference=True)
         return tree
     
+    # Builds the citation tree from a given pdf by extracting information for the root of the tree
+    # and then expanding the tree iteratively by looking up citations and related papers via APIs, 
+    # scoring them for relevance, and adding the most relevant ones as child nodes.
     def build_citation_tree(self, pdf_path: str) -> CitationTree:
         root, _ = self._prepare_root(pdf_path)
         tree = CitationTree(root=root)
@@ -186,6 +227,8 @@ class TreeBuilder:
 
     # Recursively expands the tree by looking up references and related papers, scoring them, 
     # and adding the most relevant ones as child nodes.
+    # using score() for a less accurate, less intense keyword-based score to filter obvious irrelevant papers
+    # and then applying expensive semantic similarity only on the remaining candidates for more accurate relevance
     def _expand_references(self, tree: CitationTree, paper: Paper, local_refs: list | None = None,) -> None:
         if paper.depth >= self.max_depth or len(tree.papers) >= self.max_papers:
             return
@@ -202,6 +245,7 @@ class TreeBuilder:
             "invalid": 0,
             "closed_access": 0,
         }
+        
 
         # checking multiple APIs for references, starting with the most specific (S2 and OA with ID) 
         # and falling back to title search in other sources if needed
@@ -213,6 +257,7 @@ class TreeBuilder:
                 print(f"{indent}  {label}: {len(refs)} references")
                 related.extend(refs)
 
+        # checking APIs with title search if no references found via ID-based lookup
         if not related:
             for prefix, label, client in client_prefix_list:
                 if paper.id.startswith(prefix) and paper.title:
@@ -226,7 +271,9 @@ class TreeBuilder:
                     if related:
                         break
         
-        # If no references found via APIs, try arXiv search by title keywords (for arXiv papers)
+        # if this is an arXiv/local paper and no references were found,
+        # try fetching references via Semantic Scholar using arXiv ID, or by
+        # searching the paper title in S2/OpenAlex and retrieving references from matches
         if paper.id.startswith(("arxiv:", "local:")) and not related:
             if paper.arxiv_id:
                 s2_paper = self.s2.get_by_arxiv(paper.arxiv_id)
@@ -248,8 +295,7 @@ class TreeBuilder:
                         break
 
         # NOTE: We intentionally do not add generic "related" papers in the
-        # reference tree. This tree should represent actual references only.
-
+        # reference tree. This tree should represent actual references only
         if len(related) < 5 and local_refs:
             for ref in local_refs[:10]:
                 if ref.get("title"):
@@ -287,7 +333,7 @@ class TreeBuilder:
                 drop_stats["below_similarity"] += 1
                 continue
             if not self.similarity_available:
-                # Keep a stable signal for the renderer when semantic model is absent.
+                # Keep a stable signal for the renderer when semantic model is absent
                 sim = min(1.0, sc)
 
             p.similarity_to_parent = sim
@@ -295,7 +341,7 @@ class TreeBuilder:
             self.visited.add(p.id)
             self.title_hashes.add(th)
 
-        # Keep most semantically similar papers first; relevance score is tie-breaker.
+        # Keep most semantically similar papers first - relevance score is tie-breaker.
         filtered.sort(key=lambda x: (x[2], x[1]), reverse=True)
         child_cap = min(MAX_CHILDREN_PER_NODE, self.max_papers - len(tree.papers))
         to_add = filtered[:child_cap]
@@ -327,7 +373,7 @@ class TreeBuilder:
             if len(tree.papers) < self.max_papers:
                 self._expand_references(tree, child)
 
-    # Return True if *a* and *b* are the same paper (self-citation guard)
+    # returns true if both papers are likely the same based on ID, title, and other metadata,
     @staticmethod
     def _is_same_paper(a: Paper, b: Paper) -> bool:
         
@@ -347,7 +393,7 @@ class TreeBuilder:
                 return True
         return False
    
-    # Scores candidate papers for relevance to the source suing overlap coefficient (intersection / min set size),
+    # Scores candidate papers for relevance to the source using overlap coefficient (intersection / min set size),
     # with a bonus for title word overlap, category overlap, and citation count, and for direct references/citations
     def _score(self, source: Paper, candidates: List[Paper]) -> List[Tuple[Paper, float]]:
         src_words = important_words(source.title + " " + (source.abstract or ""))
@@ -383,6 +429,7 @@ class TreeBuilder:
             
         return results
     
+    # retrieves the citations for a paper by looking up its ID and title across multiple APIs
     def _get_citations(self, paper: Paper, limit: int = API_CITATION_LIMIT) -> List[Paper]:
         citations: List[Paper] = []
 
@@ -425,7 +472,8 @@ class TreeBuilder:
             oa_future = ex.submit(_fetch_oa)
             citations.extend(s2_future.result())
             citations.extend(oa_future.result())
-
+        
+        # remove duplicates across APIs while preserving order
         dedup: list[Paper] = []
         seen_ids: set[str] = set()
         seen_titles: set[str] = set()
@@ -544,7 +592,7 @@ class TreeBuilder:
                 p.abstract or p.title
             )
 
-            # If semantic model is missing, use heuristic relevance as fallback ranking signal.
+            # If semantic model is missing, use heuristic relevance as fallback ranking signal
             if not self.similarity_available:
                 sim = rel_score
 
@@ -571,7 +619,7 @@ class TreeBuilder:
                 )
 
         # Prefer oldest valid citing papers first to avoid recency-skewed
-        # citation pages (e.g., many same-year fresh uploads), then break ties
+        # citation pages (for example, many same-year fresh uploads), then break ties
         # by semantic similarity/relevance.
         candidate_pool = to_add
         candidate_pool.sort(

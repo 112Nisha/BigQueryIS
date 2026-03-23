@@ -26,6 +26,7 @@ class OAClient(BaseClient):
         )
         self.rate_group = "oa"
 
+    # searches openalex for papers matching the query, returns a list of papers, in this code, the query is usually a paper title
     def search(self, query: str, limit: int = 10) -> List[Paper]:
         def fetch():
             r = self._get(
@@ -50,7 +51,8 @@ class OAClient(BaseClient):
         return self._request(
             f"oa:s:{query}:{limit}", fetch, "OA search"
         )
-
+    
+    # gets references of a paper by its openalex id
     def get_references(self, oa_id: str, limit: int = 50) -> List[Paper]:
         def fetch():
             r = self._get(
@@ -82,7 +84,9 @@ class OAClient(BaseClient):
         return self._request(
             f"oa:r:{oa_id}:{limit}", fetch, "OA refs"
         )
-
+    
+    # gets citations of a paper by its openalex id
+    # this is similar to get_references but with pagination to fetch citations in batches because a paper can have many more citations than references
     def get_citations(self, oa_id: str, limit: int = 50) -> List[Paper]:
         def fetch():
             ps: list[Paper] = []
@@ -129,7 +133,8 @@ class OAClient(BaseClient):
         return self._request(
             f"oa:c:{oa_id}:{limit}", fetch, "OA cites"
         )
-
+    
+    # converts a dictionary response to a list of papers because openalex returns a JSON
     def _parse(self, d: dict) -> Paper | None:
         if not d or not d.get("title"):
             return None

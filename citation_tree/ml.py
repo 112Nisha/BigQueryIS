@@ -19,6 +19,7 @@ from openai import OpenAI
 import re
 from numpy.linalg import norm
 from citation_tree.cache import Cache, RateLimiter
+from sentence_transformers import SentenceTransformer
 from citation_tree.config import (
     GROQ_API_KEY,
     LLM_EXPLANATIONS_ENABLED,
@@ -38,6 +39,7 @@ _similarity_model = None
 _thread_state = threading.local()
 
 
+# returns the state of the current thread
 def _state() -> threading.local:
     if not hasattr(_thread_state, "llm_client"):
         _thread_state.llm_client = None
@@ -45,26 +47,26 @@ def _state() -> threading.local:
         _thread_state.llm_budget_exhausted = False
     return _thread_state
 
-
+# returns true is LLM explanations are enabled and a Gemini API key is available, false otherwise
 def llm_explanations_enabled() -> bool:
     return LLM_EXPLANATIONS_ENABLED and bool(GROQ_API_KEY)
 
-
+# Returns the number of LLM calls remaining before hitting the configured budget for a run
 def _budget_remaining() -> int:
     st = _state()
     return max(0, MAX_LLM_CALLS_PER_RUN - st.llm_calls_used)
 
-
+# creates a cache key for a parent-child pair of papers
 def _pair_key(parent_id: str, child_id: str, is_reference: bool) -> str:
     rel = "ref" if is_reference else "cite"
     return f"ml:exp:{rel}:{parent_id}:{child_id}"
 
-
+# creates a cache key for summaries of papers
 def _summary_key(paper_id: str, text: str) -> str:
     digest = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
     return f"ml:sum:{paper_id}:{digest}"
 
-
+# returns the client, if the client is not initialized, it initializes it
 def _get_client() -> OpenAI | None:
     st = _state()
     if not llm_explanations_enabled():
@@ -76,19 +78,18 @@ def _get_client() -> OpenAI | None:
         )
     return st.llm_client
 
-
+# returns the text used for summaries, prefers abstracts first
 def _select_text_for_summary(paper: Paper) -> str:
-    # Prefer abstract when available; it is much cheaper than full-text chunking.
     base = (paper.abstract or "").strip()
     if len(base) >= 400:
         return base[:MAX_TEXT_CHARS_FOR_SUMMARY]
     return (paper.full_text or paper.abstract or paper.title or "").strip()[:MAX_TEXT_CHARS_FOR_SUMMARY]
 
-
+# returns a list of chunks of text
 def _chunk_text(text: str, chunk_size: int = SUMMARY_CHUNK_SIZE):
     return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
-
+# extracts key points from a chunk of text using the LLM
 def _extract_key_points(client, text_chunk: str) -> str:
     prompt = (
         "You are an expert academic reviewer.\n\n"
@@ -107,6 +108,8 @@ def _extract_key_points(client, text_chunk: str) -> str:
     result = _call_llm(client, prompt, max_output_tokens=250)
     return result
 
+# summarizes a paper by chunking the text, extracting key points from each chunk, 
+# and then merging those key points into a final summary using the LLM
 def _summarize_paper(client, paper_text: str) -> str:
     chunks = _chunk_text(paper_text)
     if len(chunks) > MAX_SUMMARY_CHUNKS:
@@ -141,6 +144,7 @@ def _summarize_paper(client, paper_text: str) -> str:
 
     return _call_llm(client, summary_prompt, max_output_tokens=500)
 
+# calls the LLM with the prompt
 def _call_llm(client, prompt, max_output_tokens=600):
     st = _state()
 
@@ -192,25 +196,23 @@ def _call_llm(client, prompt, max_output_tokens=600):
 
     return ""
 
-# Lazy-loads sentence-transformers (all-MiniLM-L6-v2)
+# Lazy-loads sentence-transformer (all-MiniLM-L6-v2)
 def _get_similarity_model():
     global _similarity_model
     if _similarity_model is None:
         try:
-            from sentence_transformers import SentenceTransformer
-
             _similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
         except ImportError:
             pass
     return _similarity_model
 
-
+# Returns true if the similarity model is available, false otherwise
 def is_similarity_available() -> bool:
     return _get_similarity_model() is not None
 
 
-# Computes the cosine similarity (0-1) between two texts using the sentence-transformers model - returns 0 if the model is unavailable 
-# or if either text is empty
+# Computes the cosine similarity (0-1) between two texts using the sentence-transformers model - checks
+# how similar two texts are
 def compute_similarity(text_a: str, text_b: str) -> float:
     model = _get_similarity_model()
     if model is None or not text_a or not text_b:
@@ -219,16 +221,15 @@ def compute_similarity(text_a: str, text_b: str) -> float:
 
     return float(dot(embeddings[0], embeddings[1])/ (norm(embeddings[0]) * norm(embeddings[1]) + 1e-9))
 
-# Trims text to the last full sentence, to avoid incomplete Gemini outputs after truncating the output
+# Trims text to the last full sentence, to avoid incomplete LLM outputs after truncating the output
 def trim_to_last_sentence(text: str) -> str:
-    
     matches = list(re.finditer(r"[.!?]", text))
     if not matches:
         return text.strip()
     return text[: matches[-1].end()].strip()
 
 
-# Generates an explanation of how the parent extends/improves on the child, using the Gemini API if available, 
+# Generates an explanation of the relationship between two papers, using the LLM API if available, 
 # or returning an empty string if not.
 def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: bool) -> str:
     st = _state()
@@ -266,7 +267,7 @@ def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: 
 
     return ""
 
-# Generates an explanation using the Gemini API, with retries and model fallbacks in case of rate-limiting or quota exhaustion
+# generates a summary for a paper
 def _get_or_build_summary(client, paper: Paper, text: str) -> str:
     if paper.summary:
         return paper.summary
@@ -283,7 +284,7 @@ def _get_or_build_summary(client, paper: Paper, text: str) -> str:
         _cache.set(key, summary)
     return summary
 
-
+# generates an explanation of how a parent paper improves upon a child paper using the LLM
 def _generate_with_gemini(client, parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
     
     print("===============STARTING A NEW PAIR OF PAPERS=============")
@@ -327,7 +328,7 @@ def _generate_with_gemini(client, parent: Paper, child: Paper, parent_text: str,
         return trim_to_last_sentence(final_text)    
     return ""
 
-
+# generates an explanation of how a child paper builds upon a parent paper using the LLM
 def _generate_with_gemini_citations(client, parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
     
     print("===============STARTING A NEW PAIR OF PAPERS=============")

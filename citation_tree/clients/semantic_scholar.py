@@ -22,6 +22,7 @@ class S2Client(BaseClient):
         )
         self.rate_group = "s2"
 
+    # searches semantic scholar for papers matching the query, returns a list of papers, in this code, the query is usually a paper title
     def search(self, query: str, limit: int = 10) -> List[Paper]:
         def fetch():
             r = self._get(
@@ -37,6 +38,8 @@ class S2Client(BaseClient):
 
         return self._request(f"s2:s:{query}:{limit}", fetch, "S2 search")
 
+    # looks up a paper by its arxiv id
+    # openalex doesn’t support direct lookup by arxiv ID, unlike semantic scholar, so we don’t implement get_by_arxiv for the openalex client
     def get_by_arxiv(self, arxiv_id: str) -> Paper | None:
         def fetch():
             r = self._get(
@@ -50,14 +53,8 @@ class S2Client(BaseClient):
             f"s2:a:{arxiv_id}", fetch, "S2 arXiv", multi=False
         )
 
-    def _get_related(
-        self,
-        paper_id: str,
-        endpoint: str,
-        nested_key: str,
-        rel: str,
-        limit: int,
-    ) -> List[Paper]:
+    # fetches related papers (references or citations) with pagination in case of too many citations/references
+    def _get_related(self, paper_id: str, endpoint: str, nested_key: str, rel: str, limit: int,) -> List[Paper]:
         def fetch():
             ps: list[Paper] = []
             # limit <= 0 means fetch all pages available from the endpoint.
@@ -113,6 +110,7 @@ class S2Client(BaseClient):
             pid, "citations", "citingPaper", "citation", limit
         )
 
+    # converts a dictionary response to a list of papers because semantic scholar returns a JSON
     def _parse(self, d: dict) -> Paper | None:
         if not d or not d.get("paperId") or not d.get("title"):
             return None
