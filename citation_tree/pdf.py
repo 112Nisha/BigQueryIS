@@ -7,6 +7,13 @@ import re
 import time
 from threading import Lock
 from typing import List
+import os
+import re
+import fitz  
+import io
+from PIL import Image
+import pytesseract
+
 
 import requests
 import tika
@@ -14,7 +21,13 @@ from citation_tree.cache import GlobalRequestGate
 from citation_tree.config import GLOBAL_ARXIV_MIN_INTERVAL
 from citation_tree.ml import trim_to_last_sentence
 from tika import parser as tika_parser
+
+from citation_tree.text_utils import titles_match
 tika.initVM()
+
+# types of arxiv id formats
+_MODERN = r"(?P<id>\d{4}\.\d{4,5}(?:v\d+)?)"
+_LEGACY = r"(?P<id>[a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)"
 
 # Tika server startup/parsing can race across threads; serialize parser calls.
 _TIKA_LOCK = Lock()
@@ -35,163 +48,68 @@ def normalize_arxiv_id(arxiv_id: str | None) -> str | None:
 
 
 # gets the latest version of an arxiv id by querying the arxiv API with the base and getting the latest version 
-def resolve_latest_arxiv_id(arxiv_id: str | None) -> str | None:
-    normalized = normalize_arxiv_id(arxiv_id)
-    if not normalized:
-        return None
+# def resolve_latest_arxiv_id(arxiv_id: str | None) -> str | None:
+#     normalized = normalize_arxiv_id(arxiv_id)
+#     if not normalized:
+#         return None
 
-    base = normalized.split("v", 1)[0]
-    try:
-        resp = GlobalRequestGate.request(
-            requests,
-            "GET",
-            "http://export.arxiv.org/api/query",
-            group="arxiv",
-            min_interval=GLOBAL_ARXIV_MIN_INTERVAL,
-            params={"id_list": base},
-            timeout=20,
-        )
-        if resp.status_code == 200:
-            # arXiv entry ids look like: http://arxiv.org/abs/1706.03762v7
-            m = re.search(r"<id>\s*https?://arxiv\.org/abs/(\d{4}\.\d{4,5}(?:v\d+)?)\s*</id>", resp.text, re.I)
-            if m:
-                return m.group(1)
-    except Exception:
-        pass
-    return normalized
+#     base = normalized.split("v", 1)[0]
+#     try:
+#         resp = GlobalRequestGate.request(
+#             requests,
+#             "GET",
+#             "http://export.arxiv.org/api/query",
+#             group="arxiv",
+#             min_interval=GLOBAL_ARXIV_MIN_INTERVAL,
+#             params={"id_list": base},
+#             timeout=20,
+#         )
+#         if resp.status_code == 200:
+#             # arXiv entry ids look like: http://arxiv.org/abs/1706.03762v7
+#             m = re.search(r"<id>\s*https?://arxiv\.org/abs/(\d{4}\.\d{4,5}(?:v\d+)?)\s*</id>", resp.text, re.I)
+#             if m:
+#                 return m.group(1)
+#     except Exception:
+#         pass
+#     return normalized
 
 # replacing the current version of the pdf with the latest version by downloading the latest version
-def ensure_latest_pdf_path(filepath: str, rate_limit: float = 1.2) -> str:
-    if not os.path.exists(filepath):
-        return filepath
+# def ensure_latest_pdf_path(filepath: str, rate_limit: float = 1.2) -> str:
+#     if not os.path.exists(filepath):
+#         return filepath
 
-    arxiv_id = _extract_arxiv_id("", filepath)
-    latest_id = resolve_latest_arxiv_id(arxiv_id)
-    if not latest_id:
-        return filepath
+#     arxiv_id = _extract_arxiv_id("", filepath)
+#     latest_id = resolve_latest_arxiv_id(arxiv_id)
+#     latest_id = arxiv_id
+#     if not latest_id:
+#         return filepath
 
-    latest_path = os.path.join(os.path.dirname(filepath), f"{latest_id}.pdf")
-    if os.path.exists(latest_path):
-        return latest_path
+#     latest_path = os.path.join(os.path.dirname(filepath), f"{latest_id}.pdf")
+#     if os.path.exists(latest_path):
+#         return latest_path
 
-    try:
-        time.sleep(rate_limit)
-        resp = GlobalRequestGate.request(
-            requests,
-            "GET",
-            f"https://arxiv.org/pdf/{latest_id}.pdf",
-            group="pdf",
-            min_interval=0.0,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"},
-            timeout=30,
-            stream=True,
-            allow_redirects=True,
-        )
-        resp.raise_for_status()
-        with open(latest_path, "wb") as fh:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    fh.write(chunk)
-        return latest_path
-    except Exception:
-        return filepath
+#     try:
+#         time.sleep(rate_limit)
+#         resp = GlobalRequestGate.request(
+#             requests,
+#             "GET",
+#             f"https://arxiv.org/pdf/{latest_id}.pdf",
+#             group="pdf",
+#             min_interval=0.0,
+#             headers={"User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"},
+#             timeout=30,
+#             stream=True,
+#             allow_redirects=True,
+#         )
+#         resp.raise_for_status()
+#         with open(latest_path, "wb") as fh:
+#             for chunk in resp.iter_content(chunk_size=8192):
+#                 if chunk:
+#                     fh.write(chunk)
+#         return latest_path
+#     except Exception:
+#         return filepath
 
-# Downloads a paper's PDF to pdfs_dir if it is not already cached.
-# Uses arxiv_id as the filename (e.g. 1706.03762.pdf).
-# Returns the local path on success, or None if the paper has no arxiv_id or the download fails.
-def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
-    url = None
-
-    latest_arxiv_id = resolve_latest_arxiv_id(getattr(paper, "arxiv_id", None))
-    if latest_arxiv_id:
-        paper.arxiv_id = latest_arxiv_id
-
-    # using pdf url 
-    if getattr(paper, "pdf_url", None) and (
-        "arxiv.org/pdf/" not in paper.pdf_url or not latest_arxiv_id
-    ):
-        url = paper.pdf_url
-    
-    # using arxiv id to construct url
-    elif latest_arxiv_id:
-        url = f"https://arxiv.org/pdf/{latest_arxiv_id}.pdf"
-
-
-    # using title to search arxiv api and get the first valid result
-    elif getattr(paper, "title", None):
-        try:
-            query = paper.title.replace(" ", "+")
-            search_url = f"http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=3"
-
-            r = GlobalRequestGate.request(
-                requests,
-                "GET",
-                search_url,
-                group="arxiv",
-                min_interval=GLOBAL_ARXIV_MIN_INTERVAL,
-                timeout=20,
-            )
-
-            if r.status_code == 200:
-                entries = re.findall(r"<id>http://arxiv.org/abs/(.*?)</id>", r.text)
-
-                for arxiv_id in entries:
-                    if arxiv_id:
-                        url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-                        break
-
-        except Exception as e:
-            print(f"  arXiv search failed: {e}")
-    
-
-    if not url:
-        print(f"  No PDF available for: {paper.title[:60]}")
-        return None
-
-    if latest_arxiv_id:
-        filename = f"{latest_arxiv_id}.pdf"
-    else:
-        safe_id = (paper.id or "unknown").replace(":", "_")
-        filename = f"{safe_id}.pdf"
-
-    local_path = os.path.join(pdfs_dir, filename)
-
-    if os.path.exists(local_path):
-        return local_path
-
-    try:
-        time.sleep(rate_limit)
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"
-        }
-
-        resp = GlobalRequestGate.request(
-            requests,
-            "GET",
-            url,
-            group="pdf",
-            min_interval=0.0,
-            headers=headers,
-            timeout=30,
-            stream=True,
-            allow_redirects=True,
-        )
-
-        resp.raise_for_status()
-
-        os.makedirs(pdfs_dir, exist_ok=True)
-
-        with open(local_path, "wb") as fh:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    fh.write(chunk)
-
-        return local_path
-
-    except Exception as exc:
-        print(f"  PDF download failed ({paper.id}): {exc}")
-        return None
 
 # Extracts title, abstract, references, and arXiv ID from a PDF
 def extract_pdf(filepath: str) -> dict:
@@ -201,7 +119,7 @@ def extract_pdf(filepath: str) -> dict:
         text = parsed.get("content", "") or ""
         meta = parsed.get("metadata", {}) or {}
         temp_abstract = _extract_abstract(text) or ""
-
+        
     except Exception as e:
         print(f"  PDF extraction error: {e}")
         return {
@@ -321,10 +239,106 @@ def _extract_references(text: str) -> List[dict]:
         )
     return out
 
-# Extracts arXiv ID from PDF text or filename
-def _extract_arxiv_id(text: str, filepath: str) -> str | None:
-    m = re.search(r"(\d{4}\.\d{4,5}(?:v\d+)?)", os.path.basename(filepath), re.I)
-    if m:
-        return m.group(1)
-    m = re.search(r"arXiv:(\d{4}\.\d{4,5}(?:v\d+)?)", text, re.I)
-    return m.group(1) if m else None
+
+
+# searches for an arxiv id in the text
+def _search_arxiv(text: str) -> str | None:
+    if not text:
+        return None
+
+    text = text.replace("\u00a0", " ")
+
+    patterns = [
+        rf"arXiv\s*[:：]\s*{_MODERN}",
+        rf"arXiv\s*[:：]\s*{_LEGACY}",
+        rf"\b{_MODERN}\b",
+        rf"\b{_LEGACY}\b",
+    ]
+
+    for p in patterns:
+        m = re.search(p, text, re.I)
+        if m:
+            return m.group("id")
+    return None
+
+# searches for an arxiv id in the image but does so for different rotated pages since the arxiv id for some pdfs are on the left margin
+def _ocr_image_for_arxiv(img: Image.Image) -> str | None:
+    for angle in (0, 90, 270, 180):
+        test_img = img.rotate(angle, expand=True) if angle else img
+        text = pytesseract.image_to_string(test_img, config="--psm 6")
+        arxiv_id = _search_arxiv(text)
+        if arxiv_id:
+            return arxiv_id
+    return None
+
+
+# finding the arxiv id in different ways - checking pdf name, checking text extracted by tika, etc.
+def _extract_arxiv_id(text: str, filepath: str, max_pages: int = 3, use_ocr: bool = True) -> str | None:
+
+    filename = os.path.basename(filepath)
+
+    # checks the file name
+    for pattern in (_MODERN, _LEGACY):
+        m = re.search(pattern, filename, re.I)
+        if m:
+            return m.group("id")
+
+    # checks the text extracted by tika  
+    front_text = text[:12000]
+    arxiv_id = _search_arxiv(front_text)
+    if arxiv_id:
+        return arxiv_id
+
+    # checks the file but extracting the first max_pages, then extracting the blocks of layout regions (like margin areas)
+    try:
+        doc = fitz.open(filepath)
+        collected_text = []
+
+        for i, page in enumerate(doc):
+            if i >= max_pages:
+                break
+            t = page.get_text("text")
+            if t:
+                collected_text.append(t)
+            blocks = page.get_text("blocks")
+            for b in blocks:
+                if len(b) >= 5 and b[4]:
+                    collected_text.append(b[4])
+
+        combined = "\n".join(collected_text)
+        arxiv_id = _search_arxiv(combined)
+        if arxiv_id:
+            return arxiv_id
+
+    except Exception as e:
+        print(f"PyMuPDF text extraction failed for {filepath}: {e}")
+
+    # checks the image via ocr
+    if not use_ocr:
+        return None
+
+    try:
+        doc = fitz.open(filepath)
+
+        for i, page in enumerate(doc):
+            if i >= 2: 
+                break
+
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+
+            w, h = img.size
+            candidates = [img]
+            left_crop = img.crop((0, 0, int(w * 0.18), h))
+            right_crop = img.crop((int(w * 0.82), 0, w, h))
+            candidates = [left_crop, right_crop, img]
+
+            for candidate in candidates:
+                arxiv_id = _ocr_image_for_arxiv(candidate)
+                if arxiv_id:
+                    return arxiv_id
+
+    except Exception as e:
+        print(f"OCR arXiv extraction failed for {filepath}: {e}")
+
+    return None

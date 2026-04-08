@@ -16,7 +16,7 @@ ARXIV_API = "http://export.arxiv.org/api/query"
 OPENALEX_API = "https://api.openalex.org"
 
 # Default input — change this to any file inside pdfs/
-INPUT_PDF = os.path.join(PDFS_DIR, "0709.1598v4.pdf")
+INPUT_PDF = os.path.join(PDFS_DIR, "test2.pdf")
 
 # Tree parameters
 MAX_DEPTH = 2

@@ -1,12 +1,4 @@
-"""ML helpers — semantic similarity and improvement explanation generation.
 
-Models are lazy-loaded so the rest of the pipeline works even when
-sentence-transformers / transformers are not installed.
-
-The generative explanation uses the Google Gemini API (gemini-1.5-flash,
-free tier) when GEMINI_API_KEY is set; otherwise it falls back to a
-keyword heuristic.
-"""
 
 from __future__ import annotations
 
@@ -257,9 +249,9 @@ def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: 
     print(f"Parent/child text ready; LLM calls remaining: {_budget_remaining()}")
 
     if is_reference:
-        explanation = _generate_with_gemini(client, parent, child, parent_text, child_text)
+        explanation = _generate_with_llm(client, parent, child, parent_text, child_text)
     else:
-        explanation = _generate_with_gemini_citations(client, parent, child, parent_text, child_text)
+        explanation = _generate_with_llm_citations(client, parent, child, parent_text, child_text)
 
     if explanation:
         _cache.set(pair_cache_key, explanation)
@@ -285,7 +277,7 @@ def _get_or_build_summary(client, paper: Paper, text: str) -> str:
     return summary
 
 # generates an explanation of how a parent paper improves upon a child paper using the LLM
-def _generate_with_gemini(client, parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
+def _generate_with_llm(client, parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
     
     print("===============STARTING A NEW PAIR OF PAPERS=============")
     parent_summary = _get_or_build_summary(client, parent, parent_text)
@@ -329,7 +321,7 @@ def _generate_with_gemini(client, parent: Paper, child: Paper, parent_text: str,
     return ""
 
 # generates an explanation of how a child paper builds upon a parent paper using the LLM
-def _generate_with_gemini_citations(client, parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
+def _generate_with_llm_citations(client, parent: Paper, child: Paper, parent_text: str, child_text: str,) -> str:
     
     print("===============STARTING A NEW PAIR OF PAPERS=============")
     parent_summary = _get_or_build_summary(client, parent, parent_text)

@@ -62,7 +62,6 @@ class S2Client(BaseClient):
             remaining = None if fetch_all else max(0, limit)
             offset = 0
             page_size = 100
-
             while fetch_all or (remaining and remaining > 0):
                 batch = page_size if fetch_all else min(page_size, remaining)
                 r = self._get(
@@ -93,6 +92,7 @@ class S2Client(BaseClient):
                 offset += len(data)
                 if not fetch_all and remaining is not None:
                     remaining -= len(data)
+
             return ps
 
         tag = "refs" if endpoint == "references" else "cites"
