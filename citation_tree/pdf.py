@@ -12,7 +12,7 @@ import requests
 import tika
 from citation_tree.cache import GlobalRequestGate
 from citation_tree.config import GLOBAL_ARXIV_MIN_INTERVAL
-from citation_tree.ml import trim_to_last_sentence
+from citation_tree.ml import extract_abstract_with_llm, trim_to_last_sentence
 from tika import parser as tika_parser
 tika.initVM()
 
@@ -100,25 +100,35 @@ def ensure_latest_pdf_path(filepath: str, rate_limit: float = 1.2) -> str:
 # Uses arxiv_id as the filename (e.g. 1706.03762.pdf).
 # Returns the local path on success, or None if the paper has no arxiv_id or the download fails.
 def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
-    url = None
-
     latest_arxiv_id = resolve_latest_arxiv_id(getattr(paper, "arxiv_id", None))
     if latest_arxiv_id:
         paper.arxiv_id = latest_arxiv_id
 
-    # using pdf url 
-    if getattr(paper, "pdf_url", None) and (
-        "arxiv.org/pdf/" not in paper.pdf_url or not latest_arxiv_id
-    ):
-        url = paper.pdf_url
-    
-    # using arxiv id to construct url
-    elif latest_arxiv_id:
-        url = f"https://arxiv.org/pdf/{latest_arxiv_id}.pdf"
+    candidates: list[tuple[str, str | None]] = []
+    seen_urls: set[str] = set()
 
+    def _add_candidate(url: str | None, arxiv_hint: str | None = None) -> None:
+        if not url:
+            return
+        norm = url.strip()
+        if not norm or norm in seen_urls:
+            return
+        seen_urls.add(norm)
+        candidates.append((norm, arxiv_hint))
 
-    # using title to search arxiv api and get the first valid result
-    elif getattr(paper, "title", None):
+    paper_pdf_url = getattr(paper, "pdf_url", None)
+    if paper_pdf_url:
+        hint = None
+        m = re.search(r"arxiv\.org/pdf/(\d{4}\.\d{4,5}(?:v\d+)?)", paper_pdf_url, re.I)
+        if m:
+            hint = m.group(1)
+        _add_candidate(paper_pdf_url, hint)
+
+    if latest_arxiv_id:
+        _add_candidate(f"https://arxiv.org/pdf/{latest_arxiv_id}.pdf", latest_arxiv_id)
+
+    # Also try arXiv title search as a fallback in case upstream PDF links are stale/broken.
+    if getattr(paper, "title", None):
         try:
             query = paper.title.replace(" ", "+")
             search_url = f"http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=3"
@@ -134,64 +144,67 @@ def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
 
             if r.status_code == 200:
                 entries = re.findall(r"<id>http://arxiv.org/abs/(.*?)</id>", r.text)
-
                 for arxiv_id in entries:
                     if arxiv_id:
-                        url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-                        break
+                        _add_candidate(f"https://arxiv.org/pdf/{arxiv_id}.pdf", arxiv_id)
 
         except Exception as e:
             print(f"  arXiv search failed: {e}")
-    
 
-    if not url:
+    if not candidates:
         print(f"  No PDF available for: {paper.title[:60]}")
         return None
 
-    if latest_arxiv_id:
-        filename = f"{latest_arxiv_id}.pdf"
-    else:
-        safe_id = (paper.id or "unknown").replace(":", "_")
-        filename = f"{safe_id}.pdf"
+    safe_id = (paper.id or "unknown").replace(":", "_")
+    last_exc = None
 
-    local_path = os.path.join(pdfs_dir, filename)
+    for url, arxiv_hint in candidates:
+        filename = f"{arxiv_hint}.pdf" if arxiv_hint else f"{safe_id}.pdf"
+        local_path = os.path.join(pdfs_dir, filename)
 
-    if os.path.exists(local_path):
-        return local_path
+        if os.path.exists(local_path):
+            if arxiv_hint:
+                paper.arxiv_id = arxiv_hint
+            return local_path
 
-    try:
-        time.sleep(rate_limit)
+        try:
+            time.sleep(rate_limit)
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"
-        }
+            headers = {
+                "User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"
+            }
 
-        resp = GlobalRequestGate.request(
-            requests,
-            "GET",
-            url,
-            group="pdf",
-            min_interval=0.0,
-            headers=headers,
-            timeout=30,
-            stream=True,
-            allow_redirects=True,
-        )
+            resp = GlobalRequestGate.request(
+                requests,
+                "GET",
+                url,
+                group="pdf",
+                min_interval=0.0,
+                headers=headers,
+                timeout=30,
+                stream=True,
+                allow_redirects=True,
+            )
 
-        resp.raise_for_status()
+            resp.raise_for_status()
 
-        os.makedirs(pdfs_dir, exist_ok=True)
+            os.makedirs(pdfs_dir, exist_ok=True)
 
-        with open(local_path, "wb") as fh:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    fh.write(chunk)
+            with open(local_path, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        fh.write(chunk)
 
-        return local_path
+            if arxiv_hint:
+                paper.arxiv_id = arxiv_hint
+            return local_path
 
-    except Exception as exc:
-        print(f"  PDF download failed ({paper.id}): {exc}")
-        return None
+        except Exception as exc:
+            last_exc = exc
+
+    if last_exc is not None:
+        print(f"  PDF download failed ({paper.id}): {last_exc}")
+    return None
 
 # Extracts title, abstract, references, and arXiv ID from a PDF
 def extract_pdf(filepath: str) -> dict:
@@ -280,18 +293,9 @@ def _extract_title(text: str, meta: dict) -> str | None:
     return None
 
 
-# Extracts abstract from PDF text using regex patterns to find the relevant section 
+# Extracts abstract from PDF text using only the LLM on the first chunks.
 def _extract_abstract(text: str) -> str | None:
-    for pat in (
-        r"(?:ABSTRACT|Abstract)\s*[:\.\-]?\s*(.*?)(?=\n\s*(?:I\.?\s+)?(?:INTRODUCTION|Introduction|1\.\s+Introduction|Keywords|KEYWORDS))",
-        r"(?:ABSTRACT|Abstract)\s*[:\.\-]?\s*(.*?)(?=\n\n\n)",
-    ):
-        m = re.search(pat, text, re.DOTALL | re.I)
-        if m:
-            a = " ".join(m.group(1).split())
-            if len(a) > 100:
-                return a[:2000]
-    return None
+    return extract_abstract_with_llm(text, max_chunks=3) or None
 
 # Extracts references from PDF text by finding the relevant section
 def _extract_references(text: str) -> List[dict]:

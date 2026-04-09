@@ -60,9 +60,9 @@ from citation_tree.config import (
 )
 from citation_tree.ml import (
     compute_similarity,
+    extract_abstract_with_llm,
     generate_improvement_explanation,
     is_similarity_available,
-    llm_explanations_enabled,
 )
 from citation_tree.models import CitationTree, Paper
 from citation_tree.pdf import download_pdf, ensure_latest_pdf_path, extract_pdf
@@ -158,16 +158,38 @@ class TreeBuilder:
                     paper, status = fut.result()
                     print(f"    {paper.title[:50]}… [{status}]")
 
-        if not llm_explanations_enabled():
-            print("\n  Skipping improvement explanations (LLM disabled or key missing)")
-            return
+        print("\n  Backfilling missing abstracts")
+        for paper in tree.papers.values():
+            if (paper.abstract or "").strip():
+                continue
+
+            looked_up = self._lookup(paper.title, paper.arxiv_id)
+            if looked_up and (looked_up.abstract or "").strip():
+                paper.abstract = looked_up.abstract
+                if not paper.arxiv_id and looked_up.arxiv_id:
+                    paper.arxiv_id = looked_up.arxiv_id
+                if not paper.pdf_url and looked_up.pdf_url:
+                    paper.pdf_url = looked_up.pdf_url
+                print(f"    {paper.title[:50]}… [metadata abstract]")
+                continue
+
+            if (paper.full_text or "").strip():
+                inferred = extract_abstract_with_llm(paper.full_text, max_chunks=3)
+                if inferred:
+                    paper.abstract = inferred
+                    print(f"    {paper.title[:50]}… [LLM abstract]")
 
         print("\n  Generating improvement explanations")
         for paper in tree.papers.values():
             if paper.parent_id and paper.parent_id in tree.papers:
                 parent = tree.papers[paper.parent_id]
                 paper.similarity_to_parent = compute_similarity(parent.abstract or parent.title, paper.abstract or paper.title,)
-                paper.improvement = generate_improvement_explanation(parent, paper, is_reference)
+
+                explanation = generate_improvement_explanation(parent, paper, is_reference)
+                if explanation:
+                    paper.improvement = explanation
+
+        tree.root.improvement = tree.root.improvement or "Root paper of this tree (no parent paper)."
     
     # returns whether the paper should be considered (doi papers are normally paywalled or closed off)
     @staticmethod

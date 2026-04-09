@@ -16,14 +16,14 @@ ARXIV_API = "http://export.arxiv.org/api/query"
 OPENALEX_API = "https://api.openalex.org"
 
 # Default input — change this to any file inside pdfs/
-INPUT_PDF = os.path.join(PDFS_DIR, "0709.1598v4.pdf")
+INPUT_PDF = os.path.join(PDFS_DIR, "1211.3711v1.pdf")
 
 # Tree parameters
 MAX_DEPTH = 2
-MAX_PAPERS = 30
+MAX_PAPERS = 10
 MIN_RELEVANCE = 0.15
 # Root -> top_k children -> each child -> top_k children (when MAX_DEPTH=2)
-MAX_CHILDREN_PER_NODE = 10
+MAX_CHILDREN_PER_NODE = 3
 
 # Per-node retrieval breadth (higher values improve coverage but cost more API calls)
 API_REFERENCE_LIMIT = 50

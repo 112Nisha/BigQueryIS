@@ -66,6 +66,11 @@ def _summary_key(paper_id: str, text: str) -> str:
     digest = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
     return f"ml:sum:{paper_id}:{digest}"
 
+
+def _abstract_key(text: str) -> str:
+    digest = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
+    return f"ml:abs:{digest}"
+
 # returns the client, if the client is not initialized, it initializes it
 def _get_client() -> OpenAI | None:
     st = _state()
@@ -229,59 +234,164 @@ def trim_to_last_sentence(text: str) -> str:
     return text[: matches[-1].end()].strip()
 
 
-# Generates an explanation of the relationship between two papers, using the LLM API if available, 
-# or returning an empty string if not.
-def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: bool) -> str:
-    st = _state()
+def _fallback_summary_from_metadata(paper: Paper) -> str:
+    title = (paper.title or "This paper").strip()
+    source = (paper.source or "unknown source").replace("_", " ")
+    year = str(paper.year) if paper.year else "unknown year"
+    venue = (paper.venue or "unspecified venue").strip()
+    return (
+        f"The paper '{title}' is recorded as a {source} entry from {year} "
+        f"with venue information '{venue}'. "
+        "Only limited source text was available, so this summary is metadata-based."
+    )
+
+
+def _backfill_abstract_from_summary(paper: Paper, summary: str) -> None:
+    if (paper.abstract or "").strip() or not summary:
+        return
+
+    candidate = " ".join(summary.split())
+    candidate = trim_to_last_sentence(candidate[:1200])
+    if len(candidate) >= 80:
+        paper.abstract = candidate
+
+
+def _fallback_improvement_explanation(parent: Paper, child: Paper, is_reference: bool) -> str:
+    parent_title = (parent.title or "the parent paper").strip()
+    child_title = (child.title or "the child paper").strip()
+
+    if is_reference:
+        return (
+            f"'{parent_title}' appears to build on prior ideas from '{child_title}'. "
+            "Based on available metadata and extracted context, the relationship is likely a "
+            "methodological or conceptual extension where the parent paper applies, refines, "
+            "or broadens techniques introduced in the child paper."
+        )
+
+    return (
+        f"'{child_title}' cites '{parent_title}' and appears to build on it as prior work. "
+        "From the available metadata and extracted context, the child paper likely extends, "
+        "adapts, or empirically validates ideas introduced by the parent paper."
+    )
+
+
+def extract_abstract_with_llm(text: str, max_chunks: int = 3) -> str:
     if not llm_explanations_enabled():
         return ""
 
-    pair_cache_key = _pair_key(parent.id, child.id, is_reference)
-    cached_exp = _cache.get(pair_cache_key)
-    if cached_exp:
-        return cached_exp
-
-    if st.llm_budget_exhausted or _budget_remaining() <= 0:
+    normalized = (text or "").strip()
+    if len(normalized) < 400:
         return ""
 
-    parent_text = _select_text_for_summary(parent)
-    child_text = _select_text_for_summary(child)
+    cache_key = _abstract_key(normalized)
+    cached = _cache.get(cache_key)
+    if cached:
+        return cached
 
-    if not parent_text or not child_text:
+    st = _state()
+    if st.llm_budget_exhausted or _budget_remaining() <= 0:
         return ""
 
     client = _get_client()
     if client is None:
         return ""
 
-    print(f"Parent/child text ready; LLM calls remaining: {_budget_remaining()}")
+    chunk_limit = max(1, min(3, max_chunks))
+    chunks = _chunk_text(normalized, chunk_size=3500)[:chunk_limit]
+    if not chunks:
+        return ""
 
-    if is_reference:
-        explanation = _generate_with_gemini(client, parent, child, parent_text, child_text)
-    else:
-        explanation = _generate_with_gemini_citations(client, parent, child, parent_text, child_text)
+    joined_chunks = "\n\n".join(
+        f"[CHUNK {i + 1}]\n{chunk}" for i, chunk in enumerate(chunks)
+    )
+
+    prompt = (
+        "You are extracting the abstract from noisy PDF text.\n\n"
+        "Given the first chunks of a paper, return ONLY the abstract text.\n"
+        "Rules:\n"
+        "- If an Abstract section appears, extract that content only.\n"
+        "- Stop before Introduction, Keywords, or numbered section headers.\n"
+        "- Do not include labels like 'Abstract'.\n"
+        "- Do not use markdown, bullets, quotes, or commentary.\n"
+        "- If no abstract is identifiable, return an empty string.\n\n"
+        "Paper chunks:\n"
+        f"{joined_chunks}\n"
+    )
+
+    result = _call_llm(client, prompt, max_output_tokens=320)
+    if not result:
+        return ""
+
+    cleaned = " ".join(result.split())
+    cleaned = re.sub(r"^\s*abstract\s*[:\-.\s]+", "", cleaned, flags=re.I)
+    low = cleaned.lower()
+
+    if re.search(r"\b(no abstract|not identifiable|cannot determine|not found)\b", low):
+        return ""
+
+    if len(cleaned.split()) < 20:
+        return ""
+
+    cleaned = trim_to_last_sentence(cleaned)[:2000]
+    if len(cleaned) < 100:
+        return ""
+
+    _cache.set(cache_key, cleaned)
+    return cleaned
+
+
+# Generates an explanation of the relationship between two papers, using the LLM API if available, 
+# or returning an empty string if not.
+def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: bool) -> str:
+    pair_cache_key = _pair_key(parent.id, child.id, is_reference)
+    cached_exp = _cache.get(pair_cache_key)
+    if cached_exp:
+        return cached_exp
+
+    explanation = ""
+    parent_text = _select_text_for_summary(parent)
+    child_text = _select_text_for_summary(child)
+
+    if llm_explanations_enabled() and parent_text and child_text:
+        st = _state()
+        if not st.llm_budget_exhausted and _budget_remaining() > 0:
+            client = _get_client()
+            if client is not None:
+                print(f"Parent/child text ready; LLM calls remaining: {_budget_remaining()}")
+
+                if is_reference:
+                    explanation = _generate_with_gemini(client, parent, child, parent_text, child_text)
+                else:
+                    explanation = _generate_with_gemini_citations(client, parent, child, parent_text, child_text)
+
+    if not explanation:
+        explanation = _fallback_improvement_explanation(parent, child, is_reference)
 
     if explanation:
         _cache.set(pair_cache_key, explanation)
-        return explanation
 
-    return ""
+    return explanation
 
 # generates a summary for a paper
 def _get_or_build_summary(client, paper: Paper, text: str) -> str:
     if paper.summary:
+        _backfill_abstract_from_summary(paper, paper.summary)
         return paper.summary
 
     key = _summary_key(paper.id, text)
     cached = _cache.get(key)
     if cached:
         paper.summary = cached
+        _backfill_abstract_from_summary(paper, cached)
         return cached
 
     summary = _summarize_paper(client, text)
-    if summary:
-        paper.summary = summary
-        _cache.set(key, summary)
+    if not summary:
+        summary = _fallback_summary_from_metadata(paper)
+
+    paper.summary = summary
+    _cache.set(key, summary)
+    _backfill_abstract_from_summary(paper, summary)
     return summary
 
 # generates an explanation of how a parent paper improves upon a child paper using the LLM
