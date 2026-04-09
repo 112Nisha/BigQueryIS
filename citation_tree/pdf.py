@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
+import io
 import os
 import re
 import time
 from threading import Lock
 from typing import List
+
 
 import requests
 import tika
@@ -15,6 +18,17 @@ from citation_tree.config import GLOBAL_ARXIV_MIN_INTERVAL
 from citation_tree.ml import extract_abstract_with_llm, trim_to_last_sentence
 from tika import parser as tika_parser
 tika.initVM()
+
+_PYTESSERACT_SENTINEL = object()
+_pytesseract_module = _PYTESSERACT_SENTINEL
+_FITZ_SENTINEL = object()
+_fitz_module = _FITZ_SENTINEL
+_PIL_IMAGE_SENTINEL = object()
+_pil_image_module = _PIL_IMAGE_SENTINEL
+
+# types of arxiv id formats
+_MODERN = r"(?P<id>\d{4}\.\d{4,5}(?:v\d+)?)"
+_LEGACY = r"(?P<id>[a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)"
 
 # Tika server startup/parsing can race across threads; serialize parser calls.
 _TIKA_LOCK = Lock()
@@ -34,75 +48,42 @@ def normalize_arxiv_id(arxiv_id: str | None) -> str | None:
     return f"{base}{version}"
 
 
-# gets the latest version of an arxiv id by querying the arxiv API with the base and getting the latest version 
-def resolve_latest_arxiv_id(arxiv_id: str | None) -> str | None:
-    normalized = normalize_arxiv_id(arxiv_id)
-    if not normalized:
-        return None
+def _get_pytesseract_module():
+    global _pytesseract_module
+    if _pytesseract_module is _PYTESSERACT_SENTINEL:
+        try:
+            _pytesseract_module = importlib.import_module("pytesseract")
+        except Exception:
+            _pytesseract_module = None
+    return _pytesseract_module
 
-    base = normalized.split("v", 1)[0]
-    try:
-        resp = GlobalRequestGate.request(
-            requests,
-            "GET",
-            "http://export.arxiv.org/api/query",
-            group="arxiv",
-            min_interval=GLOBAL_ARXIV_MIN_INTERVAL,
-            params={"id_list": base},
-            timeout=20,
-        )
-        if resp.status_code == 200:
-            # arXiv entry ids look like: http://arxiv.org/abs/1706.03762v7
-            m = re.search(r"<id>\s*https?://arxiv\.org/abs/(\d{4}\.\d{4,5}(?:v\d+)?)\s*</id>", resp.text, re.I)
-            if m:
-                return m.group(1)
-    except Exception:
-        pass
-    return normalized
 
-# replacing the current version of the pdf with the latest version by downloading the latest version
-def ensure_latest_pdf_path(filepath: str, rate_limit: float = 1.2) -> str:
-    if not os.path.exists(filepath):
-        return filepath
+def _get_fitz_module():
+    global _fitz_module
+    if _fitz_module is _FITZ_SENTINEL:
+        try:
+            _fitz_module = importlib.import_module("fitz")
+        except Exception:
+            _fitz_module = None
+    return _fitz_module
 
-    arxiv_id = _extract_arxiv_id("", filepath)
-    latest_id = resolve_latest_arxiv_id(arxiv_id)
-    if not latest_id:
-        return filepath
 
-    latest_path = os.path.join(os.path.dirname(filepath), f"{latest_id}.pdf")
-    if os.path.exists(latest_path):
-        return latest_path
-
-    try:
-        time.sleep(rate_limit)
-        resp = GlobalRequestGate.request(
-            requests,
-            "GET",
-            f"https://arxiv.org/pdf/{latest_id}.pdf",
-            group="pdf",
-            min_interval=0.0,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"},
-            timeout=30,
-            stream=True,
-            allow_redirects=True,
-        )
-        resp.raise_for_status()
-        with open(latest_path, "wb") as fh:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    fh.write(chunk)
-        return latest_path
-    except Exception:
-        return filepath
+def _get_pil_image_module():
+    global _pil_image_module
+    if _pil_image_module is _PIL_IMAGE_SENTINEL:
+        try:
+            _pil_image_module = importlib.import_module("PIL.Image")
+        except Exception:
+            _pil_image_module = None
+    return _pil_image_module
 
 # Downloads a paper's PDF to pdfs_dir if it is not already cached.
 # Uses arxiv_id as the filename (e.g. 1706.03762.pdf).
 # Returns the local path on success, or None if the paper has no arxiv_id or the download fails.
 def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
-    latest_arxiv_id = resolve_latest_arxiv_id(getattr(paper, "arxiv_id", None))
-    if latest_arxiv_id:
-        paper.arxiv_id = latest_arxiv_id
+    arxiv_id = normalize_arxiv_id(getattr(paper, "arxiv_id", None))
+    if arxiv_id:
+        paper.arxiv_id = arxiv_id
 
     candidates: list[tuple[str, str | None]] = []
     seen_urls: set[str] = set()
@@ -124,8 +105,8 @@ def download_pdf(paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
             hint = m.group(1)
         _add_candidate(paper_pdf_url, hint)
 
-    if latest_arxiv_id:
-        _add_candidate(f"https://arxiv.org/pdf/{latest_arxiv_id}.pdf", latest_arxiv_id)
+    if arxiv_id:
+        _add_candidate(f"https://arxiv.org/pdf/{arxiv_id}.pdf", arxiv_id)
 
     # Also try arXiv title search as a fallback in case upstream PDF links are stale/broken.
     if getattr(paper, "title", None):
@@ -214,7 +195,7 @@ def extract_pdf(filepath: str) -> dict:
         text = parsed.get("content", "") or ""
         meta = parsed.get("metadata", {}) or {}
         temp_abstract = _extract_abstract(text) or ""
-
+        
     except Exception as e:
         print(f"  PDF extraction error: {e}")
         return {
@@ -325,10 +306,118 @@ def _extract_references(text: str) -> List[dict]:
         )
     return out
 
-# Extracts arXiv ID from PDF text or filename
-def _extract_arxiv_id(text: str, filepath: str) -> str | None:
-    m = re.search(r"(\d{4}\.\d{4,5}(?:v\d+)?)", os.path.basename(filepath), re.I)
-    if m:
-        return m.group(1)
-    m = re.search(r"arXiv:(\d{4}\.\d{4,5}(?:v\d+)?)", text, re.I)
-    return m.group(1) if m else None
+
+
+# searches for an arxiv id in the text
+def _search_arxiv(text: str) -> str | None:
+    if not text:
+        return None
+
+    text = text.replace("\u00a0", " ")
+
+    patterns = [
+        rf"arXiv\s*[:：]\s*{_MODERN}",
+        rf"arXiv\s*[:：]\s*{_LEGACY}",
+        rf"\b{_MODERN}\b",
+        rf"\b{_LEGACY}\b",
+    ]
+
+    for p in patterns:
+        m = re.search(p, text, re.I)
+        if m:
+            return m.group("id")
+    return None
+
+# searches for an arxiv id in the image but does so for different rotated pages since the arxiv id for some pdfs are on the left margin
+def _ocr_image_for_arxiv(img) -> str | None:
+    pytesseract_module = _get_pytesseract_module()
+    if pytesseract_module is None:
+        return None
+
+    for angle in (0, 90, 270, 180):
+        test_img = img.rotate(angle, expand=True) if angle else img
+        text = pytesseract_module.image_to_string(test_img, config="--psm 6")
+        arxiv_id = _search_arxiv(text)
+        if arxiv_id:
+            return arxiv_id
+    return None
+
+
+# finding the arxiv id in different ways - checking pdf name, checking text extracted by tika, etc.
+def _extract_arxiv_id(text: str, filepath: str, max_pages: int = 3, use_ocr: bool = True) -> str | None:
+
+    filename = os.path.basename(filepath)
+
+    # checks the file name
+    for pattern in (_MODERN, _LEGACY):
+        m = re.search(pattern, filename, re.I)
+        if m:
+            return m.group("id")
+
+    # checks the text extracted by tika  
+    front_text = text[:12000]
+    arxiv_id = _search_arxiv(front_text)
+    if arxiv_id:
+        return arxiv_id
+
+    fitz_module = _get_fitz_module()
+    if fitz_module is None:
+        return None
+
+    # checks the file but extracting the first max_pages, then extracting the blocks of layout regions (like margin areas)
+    try:
+        doc = fitz_module.open(filepath)
+        collected_text = []
+
+        for i, page in enumerate(doc):
+            if i >= max_pages:
+                break
+            t = page.get_text("text")
+            if t:
+                collected_text.append(t)
+            blocks = page.get_text("blocks")
+            for b in blocks:
+                if len(b) >= 5 and b[4]:
+                    collected_text.append(b[4])
+
+        combined = "\n".join(collected_text)
+        arxiv_id = _search_arxiv(combined)
+        if arxiv_id:
+            return arxiv_id
+
+    except Exception as e:
+        print(f"PyMuPDF text extraction failed for {filepath}: {e}")
+
+    # checks the image via ocr
+    if not use_ocr:
+        return None
+
+    pil_image_module = _get_pil_image_module()
+    if pil_image_module is None:
+        return None
+
+    try:
+        doc = fitz_module.open(filepath)
+
+        for i, page in enumerate(doc):
+            if i >= 2: 
+                break
+
+            pix = page.get_pixmap(matrix=fitz_module.Matrix(2, 2))
+            img = pil_image_module.open(io.BytesIO(pix.tobytes("png")))
+
+            w, h = img.size
+            candidates = [img]
+            left_crop = img.crop((0, 0, int(w * 0.18), h))
+            right_crop = img.crop((int(w * 0.82), 0, w, h))
+            candidates = [left_crop, right_crop, img]
+
+            for candidate in candidates:
+                arxiv_id = _ocr_image_for_arxiv(candidate)
+                if arxiv_id:
+                    return arxiv_id
+
+    except Exception as e:
+        print(f"OCR arXiv extraction failed for {filepath}: {e}")
+
+    return None

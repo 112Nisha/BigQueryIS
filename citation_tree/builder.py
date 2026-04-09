@@ -40,8 +40,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
+import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Set, Tuple
+from citation_tree.cache import GlobalRequestGate
+from citation_tree.config import GLOBAL_ARXIV_MIN_INTERVAL
+import time
 
 from citation_tree.cache import Cache
 from citation_tree.clients import ArxivClient, OAClient, S2Client
@@ -65,7 +70,7 @@ from citation_tree.ml import (
     is_similarity_available,
 )
 from citation_tree.models import CitationTree, Paper
-from citation_tree.pdf import download_pdf, ensure_latest_pdf_path, extract_pdf
+from citation_tree.pdf import  extract_pdf, normalize_arxiv_id
 from citation_tree.text_utils import important_words, title_hash, titles_match
 
 # Builds a CitationTree from a given PDF
@@ -93,18 +98,19 @@ class TreeBuilder:
     # creates the root of the tree
     def _prepare_root(self, pdf_path: str) -> Paper:
         print(f"\n{'=' * 60}\n  Citation Tree Builder\n{'=' * 60}")
-        latest_pdf_path = ensure_latest_pdf_path(pdf_path, rate_limit=RATE_LIMIT)
-        if latest_pdf_path != pdf_path:
-            print(
-                f"\n  Using latest arXiv version: "
-                f"{os.path.basename(pdf_path)} -> {os.path.basename(latest_pdf_path)}"
-            )
-        pdf_path = latest_pdf_path
 
         print(f"\n  Extracting: {os.path.basename(pdf_path)}")
         info = extract_pdf(pdf_path)
         title = info["title"] or "Unknown Paper"
         arxiv_id = info["arxiv_id"]
+
+        normalized_arxiv = normalize_arxiv_id(arxiv_id)
+        if normalized_arxiv:
+            normalized_arxiv = normalized_arxiv.split("v", 1)[0]
+        if normalized_arxiv:
+            s2_paper = self.s2.get_by_arxiv(normalized_arxiv)
+            if s2_paper and s2_paper.title:
+                title = s2_paper.title
         print(f"  Title : {title}")
         if arxiv_id:
             print(f"  arXiv : {arxiv_id}")
@@ -142,12 +148,16 @@ class TreeBuilder:
         
         # downloads and extracts the full text for a paper
         def _hydrate_full_text(paper: Paper) -> tuple[Paper, str]:
-            local_path = download_pdf(paper, PDFS_DIR, rate_limit=RATE_LIMIT)
+            local_path = self.download_pdf(paper, PDFS_DIR, rate_limit=RATE_LIMIT)
             if local_path:
                 extracted = extract_pdf(local_path)
+                paper.url = local_path
+                paper.arxiv_id = extracted["arxiv_id"]
                 paper.full_text = extracted.get("text") or ""
                 if extracted.get("abstract"):
                     paper.abstract = extracted["abstract"]
+                print(f"    Extracted full text for {paper.title[:50]} stored at {local_path}")
+                print(f"  ArXiv ID: {paper.arxiv_id}\n\n")
                 return paper, f"{len(paper.full_text)} chars"
             return paper, "no PDF"
 
@@ -233,9 +243,16 @@ class TreeBuilder:
     # Looks up a paper by title and/or arXiv ID across multiple APIs, and returns a Paper object if found
     def _lookup(self, title: str, arxiv_id: str | None = None) -> Paper | None:
         if arxiv_id:
-            p = self.s2.get_by_arxiv(arxiv_id)
-            if p:
-                return p
+            normalized_arxiv = normalize_arxiv_id(arxiv_id)
+            if normalized_arxiv:
+                normalized_arxiv = normalized_arxiv.split("v", 1)[0]
+                p = self.s2.get_by_arxiv(normalized_arxiv)
+                if p:
+                    return p
+
+                p = self.arxiv.get_by_id(normalized_arxiv)
+                if p:
+                    return p
             p = self.arxiv.get_by_id(arxiv_id)
             if p:
                 return p
@@ -326,6 +343,37 @@ class TreeBuilder:
                         found.relation_type = "reference"
                         related.append(found)
 
+        # If strict references are sparse, backfill with strong title-neighbor
+        # papers so the configured branching/depth can still be explored.
+        if len(related) < MAX_CHILDREN_PER_NODE and paper.title:
+            seen_ids = {p.id for p in related if p and p.id}
+            seen_titles = {title_hash(p.title) for p in related if p and p.title}
+            target_pool = max(MAX_CHILDREN_PER_NODE * 4, 12)
+
+            for client in (self.s2, self.oa, self.arxiv):
+                if client is self.arxiv:
+                    found_candidates = client.search(paper.title, max_results=target_pool)
+                else:
+                    found_candidates = client.search(paper.title, limit=target_pool)
+
+                for candidate in found_candidates:
+                    if not candidate or not candidate.title:
+                        continue
+
+                    th = title_hash(candidate.title)
+                    if candidate.id in seen_ids or th in seen_titles:
+                        continue
+
+                    candidate.relation_type = "reference"
+                    related.append(candidate)
+                    seen_ids.add(candidate.id)
+                    seen_titles.add(th)
+
+                    if len(related) >= target_pool:
+                        break
+                if len(related) >= target_pool:
+                    break
+
         # Score and filter candidates based on relevance to the current paper, 
         # and add the most relevant ones as children in the tree
         scored = self._score(paper, related)
@@ -362,6 +410,37 @@ class TreeBuilder:
             filtered.append((p, sc, sim))
             self.visited.add(p.id)
             self.title_hashes.add(th)
+
+        # If strict filtering leaves too few children, add best remaining
+        # candidates with relaxed constraints to preserve branching.
+        if len(filtered) < MAX_CHILDREN_PER_NODE:
+            seen_ids = {p.id for p, _sc, _sim in filtered}
+            seen_titles = {title_hash(p.title) for p, _sc, _sim in filtered}
+
+            for p, sc in scored:
+                if len(filtered) >= MAX_CHILDREN_PER_NODE:
+                    break
+                if not p or not p.title:
+                    continue
+
+                th = title_hash(p.title)
+                if p.id in seen_ids or th in seen_titles:
+                    continue
+                if p.id in self.visited or th in self.title_hashes:
+                    continue
+                if self._is_same_paper(paper, p) or self._is_same_paper(tree.root, p):
+                    continue
+
+                sim = compute_similarity(paper.abstract or paper.title, p.abstract or p.title)
+                if not self.similarity_available:
+                    sim = min(1.0, max(sc, self.min_rel))
+
+                p.similarity_to_parent = sim
+                filtered.append((p, max(sc, self.min_rel), sim))
+                self.visited.add(p.id)
+                self.title_hashes.add(th)
+                seen_ids.add(p.id)
+                seen_titles.add(th)
 
         # Keep most semantically similar papers first - relevance score is tie-breaker.
         filtered.sort(key=lambda x: (x[2], x[1]), reverse=True)
@@ -683,3 +762,187 @@ class TreeBuilder:
             tree.papers[child.id] = child
             tree.edges.append((paper.id, child.id, "citation"))
             self._expand_citations(tree, child)
+
+
+
+    def _search_s2_pdf_by_title(self, title: str) -> str | None:
+        try:
+            for p in self.s2.search(title, limit=5):
+                if titles_match(title, p.title):
+                    if p.arxiv_id:
+                        return f"https://arxiv.org/pdf/{p.arxiv_id}.pdf"
+                    if p.pdf_url:
+                        return p.pdf_url
+        except Exception as e:
+            print(f"  Semantic Scholar search failed: {e}")
+        return None
+
+    def _search_oa_pdf_by_title(self, title: str) -> str | None:
+        try:
+            for p in self.oa.search(title, limit=5):
+                if titles_match(title, p.title):
+                    if p.arxiv_id:
+                        return f"https://arxiv.org/pdf/{p.arxiv_id}.pdf"
+                    if p.pdf_url:
+                        return p.pdf_url
+        except Exception as e:
+            print(f"  OpenAlex search failed: {e}")
+        return None
+
+    def _search_arxiv_pdf_by_title(self, title: str) -> str | None:
+        try:
+            query = title.replace(" ", "+")
+            search_url = f"http://export.arxiv.org/api/query?search_query=ti:{query}&start=0&max_results=5"
+
+            r = GlobalRequestGate.request(
+                requests,
+                "GET",
+                search_url,
+                group="arxiv",
+                min_interval=GLOBAL_ARXIV_MIN_INTERVAL,
+                timeout=20,
+            )
+
+            if r.status_code == 200:
+                entries = re.findall(r"<entry>(.*?)</entry>", r.text, re.DOTALL | re.I)
+
+                for entry in entries:
+                    id_match = re.search(r"<id>http://arxiv\.org/abs/(.*?)</id>", entry, re.I)
+                    title_match = re.search(r"<title>(.*?)</title>", entry, re.DOTALL | re.I)
+
+                    if not id_match or not title_match:
+                        continue
+
+                    candidate_id = id_match.group(1).strip()
+                    candidate_title = " ".join(title_match.group(1).split()).strip()
+
+                    if titles_match(title, candidate_title):
+                        return f"https://arxiv.org/pdf/{candidate_id}.pdf"
+
+        except Exception as e:
+            print(f"  arXiv search failed: {e}")
+
+        return None
+
+    def _is_valid_pdf(self, path: str) -> bool:
+        try:
+            with open(path, "rb") as f:
+                return f.read(5) == b"%PDF-"
+        except Exception:
+            return False
+    
+    # Downloads a paper's PDF to pdfs_dir if it is not already cached.
+    # Uses arxiv_id as the filename (e.g. 1706.03762.pdf).
+    # Returns the local path on success, or None if the paper has no arxiv_id or the download fails.
+    def download_pdf(self, paper, pdfs_dir: str, rate_limit: float = 1.2) -> str | None:
+        url = None
+
+        latest_arxiv_id = getattr(paper, "arxiv_id", None)
+        if latest_arxiv_id:
+            paper.arxiv_id = latest_arxiv_id
+
+        if latest_arxiv_id:
+            url = f"https://arxiv.org/pdf/{latest_arxiv_id}.pdf"
+
+        elif getattr(paper, "pdf_url", None):
+            url = paper.pdf_url
+
+
+        # using title to search arxiv api and get the first valid result
+        elif getattr(paper, "title", None):
+            searchers = [
+                ("Semantic Scholar", self._search_s2_pdf_by_title),
+                ("OpenAlex", self._search_oa_pdf_by_title),
+                ("arXiv", self._search_arxiv_pdf_by_title),
+            ]
+
+            url = None
+            for label, fn in searchers:
+                url = fn(paper.title)
+                if url:
+                    print(f"  Found PDF via {label}: {url}")
+                    break
+            # try:
+            #     query = paper.title.replace(" ", "+")
+            #     search_url = f"http://export.arxiv.org/api/query?search_query=all:{query}&start=0&max_results=3"
+
+            #     r = GlobalRequestGate.request(
+            #         requests,
+            #         "GET",
+            #         search_url,
+            #         group="arxiv",
+            #         min_interval=GLOBAL_ARXIV_MIN_INTERVAL,
+            #         timeout=20,
+            #     )
+                
+
+            #     if r.status_code == 200:
+            #         entries = re.findall(r"<id>http://arxiv.org/abs/(.*?)</id>", r.text)
+
+            #         for arxiv_id in entries:
+            #             if arxiv_id:
+            #                 url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+            #                 break
+
+            # except Exception as e:
+            #     print(f"  arXiv search failed: {e}")
+        
+
+        if not url:
+            print(f"  No PDF available for: {paper.title[:60]}")
+            return None
+
+        if latest_arxiv_id:
+            filename = f"{latest_arxiv_id}.pdf"
+        else:
+            safe_id = (paper.id or "unknown").replace(":", "_")
+            filename = f"{safe_id}.pdf"
+
+        local_path = os.path.join(pdfs_dir, filename)
+
+        if os.path.exists(local_path):
+            return local_path
+
+        try:
+            time.sleep(rate_limit)
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"
+            }
+
+            resp = GlobalRequestGate.request(
+                requests,
+                "GET",
+                url,
+                group="pdf",
+                min_interval=0.0,
+                headers=headers,
+                timeout=30,
+                stream=True,
+                allow_redirects=True,
+            )
+
+            resp.raise_for_status()
+            content_type = resp.headers.get("Content-Type", "").lower()
+
+            if "pdf" not in content_type:
+                print(f"  Not a PDF (content-type={content_type}): {url}")
+                return None
+
+            os.makedirs(pdfs_dir, exist_ok=True)
+
+            with open(local_path, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        fh.write(chunk)
+            
+            if not self._is_valid_pdf(local_path):
+                print(f"  Invalid PDF downloaded: {url}")
+                os.remove(local_path)
+                return None
+
+            return local_path
+
+        except Exception as exc:
+            print(f"  PDF download failed ({paper.id}): {exc}")
+            return None

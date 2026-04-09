@@ -20,10 +20,10 @@ INPUT_PDF = os.path.join(PDFS_DIR, "1211.3711v1.pdf")
 
 # Tree parameters
 MAX_DEPTH = 2
-MAX_PAPERS = 10
+MAX_PAPERS = 60
 MIN_RELEVANCE = 0.15
 # Root -> top_k children -> each child -> top_k children (when MAX_DEPTH=2)
-MAX_CHILDREN_PER_NODE = 3
+MAX_CHILDREN_PER_NODE = 2
 
 # Per-node retrieval breadth (higher values improve coverage but cost more API calls)
 API_REFERENCE_LIMIT = 50
