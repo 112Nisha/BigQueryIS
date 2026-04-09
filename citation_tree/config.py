@@ -4,30 +4,30 @@ import os
 
 
 def _env_bool(name: str, default: bool) -> bool:
-	value = os.getenv(name)
-	if value is None:
-		return default
-	return value.strip().lower() in {"1", "true", "yes", "on"}
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int) -> int:
-	value = os.getenv(name)
-	if value is None:
-		return default
-	try:
-		return int(value)
-	except ValueError:
-		return default
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
 
 
 def _env_float(name: str, default: float) -> float:
-	value = os.getenv(name)
-	if value is None:
-		return default
-	try:
-		return float(value)
-	except ValueError:
-		return default
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDFS_DIR = os.path.join(BASE_DIR, "pdfs")
@@ -65,6 +65,9 @@ MAX_LLM_CALLS_PER_RUN = _env_int("MAX_LLM_CALLS_PER_RUN", 1000)
 MAX_TEXT_CHARS_FOR_SUMMARY = _env_int("MAX_TEXT_CHARS_FOR_SUMMARY", 10000)
 SUMMARY_CHUNK_SIZE = _env_int("SUMMARY_CHUNK_SIZE", 5000)
 MAX_SUMMARY_CHUNKS = _env_int("MAX_SUMMARY_CHUNKS", 30)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").strip().lower()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 # Debugging
 DEBUG_PRINT_ALL_CITERS = _env_bool("DEBUG_PRINT_ALL_CITERS", False)
@@ -77,7 +80,11 @@ GLOBAL_ARXIV_MIN_INTERVAL = _env_float("GLOBAL_ARXIV_MIN_INTERVAL", 1.2)
 GLOBAL_S2_MIN_INTERVAL = _env_float("GLOBAL_S2_MIN_INTERVAL", 0.8)
 GLOBAL_OA_MIN_INTERVAL = _env_float("GLOBAL_OA_MIN_INTERVAL", 0.25)
 
-# API keys must come from environment variables in local/dev/prod.
+# Provider credentials and contact metadata (env-only for local/dev/prod)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
+OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY", "")
+OPENALEX_MAILTO = os.getenv("OPENALEX_MAILTO", "")
+ARXIV_CONTACT_EMAIL = os.getenv("ARXIV_CONTACT_EMAIL", "")

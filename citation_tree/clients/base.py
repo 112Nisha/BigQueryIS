@@ -16,23 +16,28 @@ class BaseClient:
         cache: Cache,
         rate: float = RATE_LIMIT,
         headers: dict | None = None,
+        default_params: dict | None = None,
     ):
         self.cache = cache
         self.rate = rate
         self.rate_group = "api"
         self.session = requests.Session()
+        self.default_params = default_params or {}
         if headers:
             self.session.headers.update(headers)
     
     # makes a GET request to the given url
     def _get(self, url: str, *, params: dict | None = None, timeout: int = 30):
+        merged_params = dict(self.default_params)
+        if params:
+            merged_params.update(params)
         return GlobalRequestGate.request(
             self.session,
             "GET",
             url,
             group=self.rate_group,
             min_interval=self.rate,
-            params=params,
+            params=merged_params or None,
             timeout=timeout,
         )
 

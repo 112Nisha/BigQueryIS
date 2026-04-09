@@ -13,8 +13,12 @@ from numpy.linalg import norm
 from citation_tree.cache import Cache, RateLimiter
 from sentence_transformers import SentenceTransformer
 from citation_tree.config import (
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    GROQ_MODEL,
     GROQ_API_KEY,
     LLM_EXPLANATIONS_ENABLED,
+    LLM_PROVIDER,
     MAX_LLM_CALLS_PER_RUN,
     MAX_SUMMARY_CHUNKS,
     MAX_TEXT_CHARS_FOR_SUMMARY,
@@ -35,13 +39,33 @@ _thread_state = threading.local()
 def _state() -> threading.local:
     if not hasattr(_thread_state, "llm_client"):
         _thread_state.llm_client = None
+        _thread_state.llm_provider = None
+        _thread_state.disabled_providers = set()
         _thread_state.llm_calls_used = 0
         _thread_state.llm_budget_exhausted = False
     return _thread_state
 
-# returns true is LLM explanations are enabled and a Gemini API key is available, false otherwise
+# Returns provider priority based on configured mode and available keys.
+def _provider_candidates() -> list[str]:
+    mode = (LLM_PROVIDER or "auto").strip().lower()
+    available: list[str] = []
+
+    if GROQ_API_KEY:
+        available.append("groq")
+    if GEMINI_API_KEY:
+        available.append("gemini")
+
+    if mode == "groq":
+        return ["groq"] if "groq" in available else []
+    if mode == "gemini":
+        return ["gemini"] if "gemini" in available else []
+
+    return available
+
+
+# returns true if LLM explanations are enabled and at least one provider key is available
 def llm_explanations_enabled() -> bool:
-    return LLM_EXPLANATIONS_ENABLED and bool(GROQ_API_KEY)
+    return LLM_EXPLANATIONS_ENABLED and bool(_provider_candidates())
 
 # Returns the number of LLM calls remaining before hitting the configured budget for a run
 def _budget_remaining() -> int:
@@ -63,17 +87,66 @@ def _abstract_key(text: str) -> str:
     digest = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
     return f"ml:abs:{digest}"
 
-# returns the client, if the client is not initialized, it initializes it
+def _model_for_provider(provider: str) -> str:
+    return GROQ_MODEL if provider == "groq" else GEMINI_MODEL
+
+
+def _build_client(provider: str) -> OpenAI | None:
+    if provider == "groq" and GROQ_API_KEY:
+        return OpenAI(
+            api_key=GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1",
+        )
+    if provider == "gemini" and GEMINI_API_KEY:
+        return OpenAI(
+            api_key=GEMINI_API_KEY,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+        )
+    return None
+
+
+def _switch_provider() -> tuple[str | None, OpenAI | None]:
+    st = _state()
+    if st.llm_provider:
+        st.disabled_providers.add(st.llm_provider)
+
+    st.llm_client = None
+    st.llm_provider = None
+
+    for provider in _provider_candidates():
+        if provider in st.disabled_providers:
+            continue
+
+        client = _build_client(provider)
+        if client is None:
+            continue
+
+        st.llm_provider = provider
+        st.llm_client = client
+        return provider, client
+
+    return None, None
+
+
+# returns the active client, if the client is not initialized, it initializes it
 def _get_client() -> OpenAI | None:
     st = _state()
     if not llm_explanations_enabled():
         return None
-    if st.llm_client is None:
-        st.llm_client = OpenAI(
-            api_key=GROQ_API_KEY,
-            base_url="https://api.groq.com/openai/v1",
-        )
-    return st.llm_client
+
+    candidates = _provider_candidates()
+    if not candidates:
+        return None
+
+    if (
+        st.llm_client is not None
+        and st.llm_provider in candidates
+        and st.llm_provider not in st.disabled_providers
+    ):
+        return st.llm_client
+
+    _, client = _switch_provider()
+    return client
 
 # returns the text used for summaries, prefers full paper text first
 def _select_text_for_summary(paper: Paper) -> str:
@@ -161,12 +234,19 @@ def _call_llm(client, prompt, max_output_tokens=600):
         prompt = prompt[:MAX_PROMPT_CHARS]
 
     for attempt in range(3):
+        active_client = client or _get_client()
+        if active_client is None:
+            st.llm_budget_exhausted = True
+            return ""
+
+        provider = st.llm_provider or "groq"
+
         try:
             rate_limiter.wait()
             st.llm_calls_used += 1
 
-            response = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+            response = active_client.chat.completions.create(
+                model=_model_for_provider(provider),
                 messages=[
                     {"role": "system", "content": "You are an expert academic reviewer."},
                     {"role": "user", "content": prompt},
@@ -191,11 +271,17 @@ def _call_llm(client, prompt, max_output_tokens=600):
             msg = " ".join(str(exc).splitlines())[:120]
             low = msg.lower()
             if "rate" in low and "limit" in low:
-                st.llm_budget_exhausted = True
-                return ""
+                client = None
+                _switch_provider()
+                continue
             if "quota" in low or "insufficient" in low:
-                st.llm_budget_exhausted = True
-                return ""
+                client = None
+                _switch_provider()
+                continue
+            if "unauthorized" in low or "invalid" in low or "api key" in low:
+                client = None
+                _switch_provider()
+                continue
             _time.sleep(3 * (attempt + 1))
 
     return ""

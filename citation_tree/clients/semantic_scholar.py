@@ -6,7 +6,11 @@ from typing import List
 
 from citation_tree.cache import Cache
 from citation_tree.clients.base import BaseClient
-from citation_tree.config import GLOBAL_S2_MIN_INTERVAL, SEMANTIC_SCHOLAR_API
+from citation_tree.config import (
+    GLOBAL_S2_MIN_INTERVAL,
+    SEMANTIC_SCHOLAR_API,
+    SEMANTIC_SCHOLAR_API_KEY,
+)
 from citation_tree.models import Paper
 
 
@@ -17,8 +21,14 @@ class S2Client(BaseClient):
     )
 
     def __init__(self, cache: Cache):
+        headers = {"User-Agent": "CitationTree/2.0"}
+        if SEMANTIC_SCHOLAR_API_KEY:
+            headers["x-api-key"] = SEMANTIC_SCHOLAR_API_KEY
+
         super().__init__(
-            cache, rate=GLOBAL_S2_MIN_INTERVAL, headers={"User-Agent": "CitationTree/2.0"}
+            cache,
+            rate=GLOBAL_S2_MIN_INTERVAL,
+            headers=headers,
         )
         self.rate_group = "s2"
 

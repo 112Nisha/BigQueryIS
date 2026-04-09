@@ -8,13 +8,21 @@ from xml.etree import ElementTree as ET
 
 from citation_tree.cache import Cache
 from citation_tree.clients.base import BaseClient
-from citation_tree.config import ARXIV_API, GLOBAL_ARXIV_MIN_INTERVAL
+from citation_tree.config import ARXIV_API, ARXIV_CONTACT_EMAIL, GLOBAL_ARXIV_MIN_INTERVAL
 from citation_tree.models import Paper
 
 
 class ArxivClient(BaseClient):
     def __init__(self, cache: Cache):
-        super().__init__(cache, rate=GLOBAL_ARXIV_MIN_INTERVAL)
+        user_agent = "CitationTree/2.0"
+        if ARXIV_CONTACT_EMAIL:
+            user_agent = f"CitationTree/2.0 ({ARXIV_CONTACT_EMAIL})"
+
+        super().__init__(
+            cache,
+            rate=GLOBAL_ARXIV_MIN_INTERVAL,
+            headers={"User-Agent": user_agent},
+        )
         self.rate_group = "arxiv"
     
     # searches arxiv for papers matching the query, returns a list of papers, in this code, the query is usually a paper title

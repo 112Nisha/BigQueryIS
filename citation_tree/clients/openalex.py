@@ -6,7 +6,12 @@ from typing import List
 
 from citation_tree.cache import Cache
 from citation_tree.clients.base import BaseClient
-from citation_tree.config import GLOBAL_OA_MIN_INTERVAL, OPENALEX_API
+from citation_tree.config import (
+    GLOBAL_OA_MIN_INTERVAL,
+    OPENALEX_API,
+    OPENALEX_API_KEY,
+    OPENALEX_MAILTO,
+)
 from citation_tree.models import Paper
 
 
@@ -17,12 +22,21 @@ class OAClient(BaseClient):
     )
 
     def __init__(self, cache: Cache):
+        default_params = {}
+        if OPENALEX_MAILTO:
+            default_params["mailto"] = OPENALEX_MAILTO
+        if OPENALEX_API_KEY:
+            default_params["api_key"] = OPENALEX_API_KEY
+
+        user_agent = "CitationTree/2.0"
+        if OPENALEX_MAILTO:
+            user_agent = f"CitationTree/2.0 (mailto:{OPENALEX_MAILTO})"
+
         super().__init__(
             cache,
             rate=GLOBAL_OA_MIN_INTERVAL,
-            headers={
-                "User-Agent": "CitationTree/2.0 (mailto:research@example.com)"
-            },
+            headers={"User-Agent": user_agent},
+            default_params=default_params,
         )
         self.rate_group = "oa"
 

@@ -9,7 +9,11 @@ services:
     envVars:
       - key: GUNICORN_WORKERS
         value: "1"
-      - key: LLM_EXPLANATIONS_ENABLED
-        value: "true"
       - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SEMANTIC_SCHOLAR_API_KEY
+        sync: false
+      - key: OPENALEX_API_KEY
         sync: false
