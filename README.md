@@ -11,6 +11,7 @@ Discovers related papers via **Semantic Scholar**, **arXiv**, and **OpenAlex**, 
 - **ML-powered explanations** — Groq-hosted OpenAI-compatible models generate improvement summaries between parent and child papers
 - **Semantic similarity** — sentence-transformers cosine similarity scores
 - **Interactive HTML output** — dark-themed, searchable, with detail panel
+- **Simple web UI** — paste a paper link, wait on a loading page, then view generated HTML with a back-to-home button
 
 ## Setup
 
@@ -20,7 +21,7 @@ Discovers related papers via **Semantic Scholar**, **arXiv**, and **OpenAlex**, 
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install requests tika numpy openai sentence-transformers
+pip install -r requirements.txt
 ```
 
 > Tika requires **Java 8+** on your system.
@@ -28,12 +29,20 @@ pip install requests tika numpy openai sentence-transformers
 ### 2. Configure LLM explanations (optional)
 
 The project currently uses a Groq-hosted OpenAI-compatible endpoint in `citation_tree/ml.py`.
-To enable paper improvement summaries, set `GROQ_API_KEY` in `citation_tree/config.py`.
+To enable paper improvement summaries, set `GROQ_API_KEY` as an environment variable.
 
 If you do not want LLM-generated explanations, set:
 
-```python
-LLM_EXPLANATIONS_ENABLED = False
+```bash
+export LLM_EXPLANATIONS_ENABLED=false
+```
+
+Example shell setup:
+
+```bash
+cp .env.example .env
+export GROQ_API_KEY="your_key_here"
+export LLM_EXPLANATIONS_ENABLED=true
 ```
 
 Optional OCR/image extraction dependencies (only needed for scanned PDFs):
@@ -43,6 +52,24 @@ pip install pymupdf pillow pytesseract
 ```
 
 ## Usage
+
+### Run the web app (simple hosted UI)
+
+```bash
+python web_app.py
+```
+
+Then open:
+
+```text
+http://localhost:8000
+```
+
+What the web app does:
+- asks for a paper URL (or local PDF path)
+- shows a loading/status page while trees are built
+- opens a result page with the generated HTML embedded
+- includes a persistent **Back to start** button
 
 ### Run from an online URL (recommended)
 
@@ -87,6 +114,42 @@ When generation succeeds, one of the HTML files is opened automatically in your 
 3. Open `output/reference_tree.html` and `output/citation_tree.html`.
 4. Tune limits in `citation_tree/config.py` and rerun if you need broader/deeper trees.
 
+## Hosting
+
+Recommended stack for simple hosting:
+- **Flask** app (`web_app.py`) as the web server
+- **Gunicorn** as the production process manager
+- **Docker** runtime with Java installed for Tika
+
+Production start command:
+
+```bash
+gunicorn -w 1 -b 0.0.0.0:${PORT:-8000} web_app:app
+```
+
+Notes for cloud deploy (Render/Railway/Fly.io/etc.):
+- install command: `pip install -r requirements.txt`
+- start command: `gunicorn -w 1 -b 0.0.0.0:$PORT web_app:app`
+- ensure Java is available for Tika
+- keep API keys in environment variables/secrets (not hardcoded)
+
+### Deploy to Render (public URL)
+
+This repo now includes `render.yaml` + `Dockerfile`, so Render can deploy it directly.
+
+1. Push this repo to GitHub.
+2. Create a Render account and click **New +** -> **Blueprint**.
+3. Connect your GitHub repo and select this project.
+4. Render will detect `render.yaml` and create the web service.
+5. In Render service settings, set secret env var `GROQ_API_KEY`.
+6. Deploy. After the build finishes, Render gives you a public URL like:
+    - `https://bigqueryis-web.onrender.com`
+7. Share that URL. Users can open it, submit a paper link, and use the generated HTML views.
+
+Notes:
+- Free Render services can sleep when idle and need a short cold-start wakeup.
+- If you want to run without LLM summaries, set `LLM_EXPLANATIONS_ENABLED=false`.
+
 ### Notes on first run
 
 - Apache Tika may take extra time the first time it starts.
@@ -95,7 +158,7 @@ When generation succeeds, one of the HTML files is opened automatically in your 
 
 ## Configuration
 
-Edit `citation_tree/config.py`:
+Set these via environment variables (defaults are defined in `citation_tree/config.py`):
 
 | Variable | Default | Description |
 |---|---|---|

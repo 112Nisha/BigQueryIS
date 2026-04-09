@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Citation Tree Web Runner</title>
+    <style>
+      :root {
+        --bg: #f4efe7;
+        --surface: #fffdf8;
+        --ink: #1f2937;
+        --muted: #6b7280;
+        --accent: #0f766e;
+        --accent-2: #115e59;
+        --border: #d6d3d1;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Trebuchet MS", "Segoe UI", sans-serif;
+        color: var(--ink);
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 15% 10%, #d1fae5 0%, rgba(209, 250, 229, 0) 45%),
+          radial-gradient(circle at 90% 25%, #fef3c7 0%, rgba(254, 243, 199, 0) 40%),
+          linear-gradient(135deg, #f4efe7, #ece6dc);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(760px, 100%);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        background: var(--surface);
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.1);
+        padding: 28px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(1.7rem, 3vw, 2.4rem);
+        line-height: 1.1;
+      }
+      p {
+        margin: 0;
+        color: var(--muted);
+      }
+      form {
+        margin-top: 24px;
+        display: grid;
+        gap: 12px;
+      }
+      label {
+        font-size: 0.9rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+      input[type="text"] {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 14px;
+        font: inherit;
+        background: #ffffff;
+      }
+      input[type="text"]:focus {
+        outline: 2px solid color-mix(in srgb, var(--accent) 30%, white);
+        border-color: var(--accent);
+      }
+      button {
+        border: none;
+        border-radius: 12px;
+        padding: 13px 16px;
+        font: inherit;
+        font-weight: 700;
+        color: white;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        cursor: pointer;
+      }
+      .error {
+        margin-top: 12px;
+        border: 1px solid #fecaca;
+        background: #fef2f2;
+        color: #b91c1c;
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .hint {
+        margin-top: 16px;
+        font-size: 0.9rem;
+      }
+      .hint strong {
+        color: #374151;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Build a Citation Tree from a Link</h1>
+      <p>Paste a paper URL (or local PDF path on this machine), and the app will generate interactive HTML views.</p>
+
+      {% if error %}
+      <div class="error">{{ error }}</div>
+      {% endif %}
+
+      <form action="{{ url_for('create_job') }}" method="post">
+        <label for="source">Paper URL or PDF path</label>
+        <input
+          id="source"
+          name="source"
+          type="text"
+          required
+          placeholder="https://arxiv.org/abs/1706.03762"
+        />
+        <button type="submit">Generate HTML</button>
+      </form>
+
+      <p class="hint"><strong>Note:</strong> First runs can take a while because models and parsers warm up.</p>
+    </main>
+  </body>
+</html>

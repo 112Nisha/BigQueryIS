@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: bigqueryis-web
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: GUNICORN_WORKERS
+        value: "1"
+      - key: LLM_EXPLANATIONS_ENABLED
+        value: "true"
+      - key: GROQ_API_KEY
+        sync: false

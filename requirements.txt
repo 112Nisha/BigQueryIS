@@ -1,0 +1,7 @@
+requests
+flask
+gunicorn
+tika
+numpy
+openai
+sentence-transformers

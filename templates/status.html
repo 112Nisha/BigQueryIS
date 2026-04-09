@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Building Tree</title>
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --ink: #0f172a;
+        --muted: #475569;
+        --accent: #0284c7;
+        --card: #ffffff;
+        --border: #cbd5e1;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+        background: linear-gradient(160deg, #f0f9ff, #eef2ff);
+        font-family: "Manrope", "Segoe UI", sans-serif;
+        color: var(--ink);
+      }
+      .card {
+        width: min(640px, 100%);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 26px;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: clamp(1.4rem, 3vw, 2rem);
+      }
+      p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .status-row {
+        margin-top: 18px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .spinner {
+        width: 20px;
+        height: 20px;
+        border: 3px solid #bae6fd;
+        border-top-color: var(--accent);
+        border-radius: 999px;
+        animation: spin 1s linear infinite;
+      }
+      .pill {
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        background: #e0f2fe;
+        color: #0c4a6e;
+      }
+      .source {
+        margin-top: 14px;
+        border: 1px dashed #bae6fd;
+        border-radius: 12px;
+        padding: 10px;
+        font-size: 0.9rem;
+        color: #0f172a;
+        word-break: break-word;
+      }
+      .error {
+        margin-top: 16px;
+        border: 1px solid #fecaca;
+        background: #fef2f2;
+        border-radius: 12px;
+        color: #991b1b;
+        padding: 12px;
+      }
+      a {
+        color: #0369a1;
+        font-weight: 600;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Building Your HTML Trees</h1>
+      <p>This page auto-refreshes in the background and will move to the result as soon as output is ready.</p>
+
+      <div class="status-row">
+        <div class="spinner"></div>
+        <span class="pill" id="status-pill">{{ job.status }}</span>
+      </div>
+
+      <div class="source">Source: {{ job.source }}</div>
+      <div id="error-box"></div>
+
+      <p style="margin-top: 16px"><a href="{{ url_for('index') }}">Back to start</a></p>
+    </main>
+
+    <script>
+      const statusPill = document.getElementById("status-pill");
+      const errorBox = document.getElementById("error-box");
+
+      async function pollStatus() {
+        try {
+          const res = await fetch("{{ url_for('job_status_api', job_id=job.id) }}", { cache: "no-store" });
+          if (!res.ok) {
+            throw new Error("Could not fetch status");
+          }
+
+          const data = await res.json();
+          statusPill.textContent = data.status;
+
+          if (data.status === "completed" && data.result_url) {
+            window.location.href = data.result_url;
+            return;
+          }
+
+          if (data.status === "failed") {
+            errorBox.innerHTML = `<div class="error">Generation failed: ${data.error || "Unknown error"}</div>`;
+            return;
+          }
+        } catch (err) {
+          errorBox.innerHTML = `<div class="error">${err.message}</div>`;
+        }
+
+        setTimeout(pollStatus, 2500);
+      }
+
+      setTimeout(pollStatus, 1000);
+    </script>
+  </body>
+</html>
