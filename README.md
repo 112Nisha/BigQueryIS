@@ -56,7 +56,11 @@ Everything else has defaults in code. Optional non-key settings you can add only
 # Optional (not API keys)
 export OPENALEX_MAILTO="you@example.com"
 export ARXIV_CONTACT_EMAIL="you@example.com"
+export LOW_MEMORY_MODE=true
+export DELETE_PDFS_AFTER_USE=true
 ```
+
+By default, downloaded PDFs are deleted after extraction (`DELETE_PDFS_AFTER_USE=true`).
 
 Optional OCR/image extraction dependencies (only needed for scanned PDFs):
 
@@ -195,6 +199,11 @@ This repo now includes `render.yaml` + `Dockerfile`, so Render can deploy it dir
     - `https://bigqueryis-web.onrender.com`
 7. Share that URL. Users can open it, submit a paper link, and use the generated HTML views.
 
+Memory note:
+- `render.yaml` sets `LOW_MEMORY_MODE=true` by default for safer free-tier deploys.
+- In low-memory mode, tree builds run sequentially and semantic similarity model loading is disabled.
+- This reduces memory usage substantially, with a small quality tradeoff in semantic filtering.
+
 ### Make changes and reflect them on Render
 
 Code changes flow:
@@ -229,6 +238,7 @@ Config/secret changes flow:
 Notes:
 - Free Render services can sleep when idle and need a short cold-start wakeup.
 - If you want to run without LLM summaries, set `LLM_EXPLANATIONS_ENABLED=false`.
+- If you still hit memory limits, keep `LOW_MEMORY_MODE=true` and reduce `MAX_PAPERS` (for example to `30`).
 
 ### Notes on first run
 
@@ -249,6 +259,7 @@ Set these via environment variables (defaults are defined in `citation_tree/conf
 | `MAX_CHILDREN_PER_NODE` | `2` | Max children kept per expanded node |
 | `LLM_EXPLANATIONS_ENABLED` | `True` | Enable/disable LLM improvement summaries |
 | `LLM_PROVIDER` | `auto` | `auto`, `groq`, or `gemini` |
+| `DELETE_PDFS_AFTER_USE` | `True` | Delete downloaded PDFs after extraction to save disk space |
 | `GROQ_API_KEY` | `""` | API key for Groq |
 | `GEMINI_API_KEY` | `""` | API key for Gemini |
 | `SEMANTIC_SCHOLAR_API_KEY` | `""` | Optional key for Semantic Scholar higher limits |

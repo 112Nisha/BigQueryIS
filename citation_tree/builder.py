@@ -43,6 +43,7 @@ import os
 import re
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from typing import List, Set, Tuple
 from citation_tree.cache import GlobalRequestGate
 from citation_tree.config import GLOBAL_ARXIV_MIN_INTERVAL
@@ -53,6 +54,7 @@ from citation_tree.clients import ArxivClient, OAClient, S2Client
 from citation_tree.config import (
     API_CITATION_LIMIT,
     API_REFERENCE_LIMIT,
+    DELETE_PDFS_AFTER_USE,
     DEBUG_PRINT_ALL_CITERS,
     MAX_FETCH_WORKERS,
     MAX_CHILDREN_PER_NODE,
@@ -145,20 +147,45 @@ class TreeBuilder:
     def _postprocess(self, tree: CitationTree, is_reference: bool) -> None:
         print("\n  Downloading PDFs and extracting full text")
         papers_to_process = [p for p in tree.papers.values() if not p.full_text]
+        cleanup_paths: set[str] = set()
+        cleanup_lock = Lock()
+
+        def _queue_pdf_cleanup(local_path: str | None) -> None:
+            if not DELETE_PDFS_AFTER_USE or not local_path:
+                return
+            try:
+                real_pdf_dir = os.path.realpath(PDFS_DIR)
+                real_path = os.path.realpath(local_path)
+                if os.path.isfile(real_path) and os.path.commonpath([real_pdf_dir, real_path]) == real_pdf_dir:
+                    with cleanup_lock:
+                        cleanup_paths.add(real_path)
+            except Exception:
+                # Best-effort cleanup only; extraction should not fail due to cleanup logic.
+                return
         
         # downloads and extracts the full text for a paper
         def _hydrate_full_text(paper: Paper) -> tuple[Paper, str]:
             local_path = self.download_pdf(paper, PDFS_DIR, rate_limit=RATE_LIMIT)
             if local_path:
-                extracted = extract_pdf(local_path)
-                paper.url = local_path
-                paper.arxiv_id = extracted["arxiv_id"]
-                paper.full_text = extracted.get("text") or ""
-                if extracted.get("abstract"):
-                    paper.abstract = extracted["abstract"]
-                print(f"    Extracted full text for {paper.title[:50]} stored at {local_path}")
-                print(f"  ArXiv ID: {paper.arxiv_id}\n\n")
-                return paper, f"{len(paper.full_text)} chars"
+                try:
+                    extracted = extract_pdf(local_path)
+                    paper.arxiv_id = extracted["arxiv_id"]
+                    paper.full_text = extracted.get("text") or ""
+                    if extracted.get("abstract"):
+                        paper.abstract = extracted["abstract"]
+
+                    if paper.arxiv_id and not paper.pdf_url:
+                        paper.pdf_url = f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
+                    if not paper.url:
+                        paper.url = paper.pdf_url or (
+                            f"https://arxiv.org/abs/{paper.arxiv_id}" if paper.arxiv_id else None
+                        )
+
+                    print(f"    Extracted full text for {paper.title[:50]} from downloaded PDF")
+                    print(f"  ArXiv ID: {paper.arxiv_id}\n\n")
+                    return paper, f"{len(paper.full_text)} chars"
+                finally:
+                    _queue_pdf_cleanup(local_path)
             return paper, "no PDF"
 
         if papers_to_process:
@@ -167,6 +194,15 @@ class TreeBuilder:
                 for fut in as_completed(futures):
                     paper, status = fut.result()
                     print(f"    {paper.title[:50]}… [{status}]")
+
+        if DELETE_PDFS_AFTER_USE and cleanup_paths:
+            print("\n  Cleaning up downloaded PDFs")
+            for path in sorted(cleanup_paths):
+                try:
+                    os.remove(path)
+                    print(f"    Deleted {os.path.basename(path)}")
+                except OSError as exc:
+                    print(f"    Could not delete {os.path.basename(path)}: {exc}")
 
         print("\n  Backfilling missing abstracts")
         for paper in tree.papers.values():

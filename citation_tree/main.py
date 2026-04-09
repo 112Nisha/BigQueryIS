@@ -13,7 +13,13 @@ import tika
 tika.initVM()
 
 from citation_tree.builder import TreeBuilder
-from citation_tree.config import INPUT_PDF, OUTPUT_DIR, PDFS_DIR
+from citation_tree.config import (
+    DELETE_PDFS_AFTER_USE,
+    INPUT_PDF,
+    OUTPUT_DIR,
+    PARALLEL_TREE_BUILDS,
+    PDFS_DIR,
+)
 from citation_tree.pdf import resolve_pdf_source
 from citation_tree.renderer import (
     render_html_reference_tree,
@@ -35,25 +41,51 @@ def build_trees(
     if source_value.startswith(("http://", "https://")):
         print(f"\n  Source URL resolved to local PDF: {pdf}")
 
+    cleanup_source_pdf = (
+        DELETE_PDFS_AFTER_USE
+        and source_value.startswith(("http://", "https://"))
+        and os.path.isfile(pdf)
+    )
+
     citation_builder = TreeBuilder()
     reference_builder = TreeBuilder()
+    ref_tree = None
+    cite_tree = None
 
-    print("\n  Building reference and citation trees in parallel")
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        ref_future = ex.submit(reference_builder.build_reference_tree, pdf)
-        cite_future = ex.submit(citation_builder.build_citation_tree, pdf)
-        ref_tree = None
-        cite_tree = None
+    if PARALLEL_TREE_BUILDS:
+        print("\n  Building reference and citation trees in parallel")
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            ref_future = ex.submit(reference_builder.build_reference_tree, pdf)
+            cite_future = ex.submit(citation_builder.build_citation_tree, pdf)
+
+            try:
+                ref_tree = ref_future.result()
+            except Exception as exc:
+                print(f"  Reference tree build failed: {exc}")
+
+            try:
+                cite_tree = cite_future.result()
+            except Exception as exc:
+                print(f"  Citation tree build failed: {exc}")
+    else:
+        print("\n  Building reference and citation trees sequentially (parallel disabled)")
 
         try:
-            ref_tree = ref_future.result()
+            ref_tree = reference_builder.build_reference_tree(pdf)
         except Exception as exc:
             print(f"  Reference tree build failed: {exc}")
 
         try:
-            cite_tree = cite_future.result()
+            cite_tree = citation_builder.build_citation_tree(pdf)
         except Exception as exc:
             print(f"  Citation tree build failed: {exc}")
+
+    if cleanup_source_pdf:
+        try:
+            os.remove(pdf)
+            print(f"  Cleaned up source PDF: {os.path.basename(pdf)}")
+        except OSError as exc:
+            print(f"  Could not delete source PDF {os.path.basename(pdf)}: {exc}")
 
     target_output_dir = output_dir or OUTPUT_DIR
     os.makedirs(target_output_dir, exist_ok=True)

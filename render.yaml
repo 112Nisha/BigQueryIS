@@ -9,6 +9,8 @@ services:
     envVars:
       - key: GUNICORN_WORKERS
         value: "1"
+      - key: LOW_MEMORY_MODE
+        value: "true"
       - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY

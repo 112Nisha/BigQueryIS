@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 import hashlib
+import importlib
 import time as _time
 import threading
 from numpy import dot
@@ -11,7 +12,6 @@ from openai import OpenAI
 import re
 from numpy.linalg import norm
 from citation_tree.cache import Cache, RateLimiter
-from sentence_transformers import SentenceTransformer
 from citation_tree.config import (
     GEMINI_API_KEY,
     GEMINI_MODEL,
@@ -22,6 +22,7 @@ from citation_tree.config import (
     MAX_LLM_CALLS_PER_RUN,
     MAX_SUMMARY_CHUNKS,
     MAX_TEXT_CHARS_FOR_SUMMARY,
+    SIMILARITY_ENABLED,
     SUMMARY_CHUNK_SIZE,
 )
 
@@ -289,11 +290,18 @@ def _call_llm(client, prompt, max_output_tokens=600):
 # Lazy-loads sentence-transformer (all-MiniLM-L6-v2)
 def _get_similarity_model():
     global _similarity_model
+    if not SIMILARITY_ENABLED:
+        return None
+
+    if _similarity_model is False:
+        return None
+
     if _similarity_model is None:
         try:
-            _similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
-        except ImportError:
-            pass
+            st_module = importlib.import_module("sentence_transformers")
+            _similarity_model = st_module.SentenceTransformer("all-MiniLM-L6-v2")
+        except Exception:
+            _similarity_model = False
     return _similarity_model
 
 # Returns true if the similarity model is available, false otherwise
