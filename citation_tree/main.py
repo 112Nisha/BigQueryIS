@@ -14,6 +14,7 @@ tika.initVM()
 
 from citation_tree.builder import TreeBuilder
 from citation_tree.config import INPUT_PDF, OUTPUT_DIR, PDFS_DIR
+from citation_tree.pdf import resolve_pdf_source
 from citation_tree.renderer import (
     render_html_reference_tree,
     render_html_citation_tree,
@@ -21,15 +22,15 @@ from citation_tree.renderer import (
 
 
 def main():
-    pdf = sys.argv[1] if len(sys.argv) > 1 else INPUT_PDF
+    source = sys.argv[1] if len(sys.argv) > 1 else INPUT_PDF
+    pdf, error = resolve_pdf_source(source, PDFS_DIR)
 
-    # Resolve relative names inside pdfs/
-    if not os.path.isabs(pdf) and not os.path.exists(pdf):
-        pdf = os.path.join(PDFS_DIR, pdf)
-
-    if not os.path.exists(pdf):
-        print(f"Error: file not found - {pdf}")
+    if not pdf:
+        print(f"Error: {error}")
         sys.exit(1)
+
+    if source.startswith(("http://", "https://")):
+        print(f"\n  Source URL resolved to local PDF: {pdf}")
 
     citation_builder = TreeBuilder()
     reference_builder = TreeBuilder()

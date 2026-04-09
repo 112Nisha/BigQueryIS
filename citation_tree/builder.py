@@ -575,34 +575,198 @@ class TreeBuilder:
             results.append((p, sc))
             
         return results
+
+    @staticmethod
+    def _title_overlap_score(a: str, b: str) -> float:
+        wa, wb = important_words(a or ""), important_words(b or "")
+        if not wa or not wb:
+            return 0.0
+        return len(wa & wb) / max(1, min(len(wa), len(wb)))
+
+    @staticmethod
+    def _title_query_variants(title: str) -> list[str]:
+        raw = (title or "").strip()
+        if not raw:
+            return []
+
+        variants: list[str] = []
+
+        def _add(q: str) -> None:
+            q = " ".join((q or "").split()).strip()
+            if q and q not in variants:
+                variants.append(q)
+
+        _add(raw)
+
+        cleaned = re.sub(r"[^A-Za-z0-9 ]+", " ", raw)
+        _add(cleaned)
+
+        _add(" ".join(raw.split()[:10]))
+        _add(" ".join(cleaned.split()[:10]))
+
+        return variants
+
+    def _search_s2_with_retry(self, query: str, limit: int = 10) -> List[Paper]:
+        for attempt in range(2):
+            results = self.s2.search(query, limit=limit)
+            if results:
+                return results
+            if attempt == 0:
+                time.sleep(0.8)
+        return []
+
+    def _search_oa_with_retry(self, query: str, limit: int = 10) -> List[Paper]:
+        for attempt in range(2):
+            results = self.oa.search(query, limit=limit)
+            if results:
+                return results
+            if attempt == 0:
+                time.sleep(0.8)
+        return []
+
+    def _resolve_s2_id_for_paper(self, paper: Paper) -> str | None:
+        if paper.id.startswith("s2:"):
+            return paper.id.split(":", 1)[1]
+
+        if paper.arxiv_id:
+            s2_paper = self.s2.get_by_arxiv(paper.arxiv_id)
+            if s2_paper:
+                return s2_paper.id.split(":", 1)[1]
+
+        if paper.doi:
+            s2_paper = self.s2.get_by_doi(paper.doi)
+            if s2_paper:
+                return s2_paper.id.split(":", 1)[1]
+
+        title = (paper.title or "").strip()
+        if not title:
+            return None
+
+        best_id = None
+        best_score = 0.0
+        for query in self._title_query_variants(title):
+            for candidate in self._search_s2_with_retry(query, limit=8):
+                if not candidate or not candidate.title:
+                    continue
+
+                overlap = self._title_overlap_score(title, candidate.title)
+                score = overlap + (1.0 if titles_match(title, candidate.title) else 0.0)
+                if score > best_score:
+                    best_score = score
+                    best_id = candidate.id.split(":", 1)[1]
+
+                if titles_match(title, candidate.title):
+                    return candidate.id.split(":", 1)[1]
+
+        if best_id and best_score >= 0.75:
+            return best_id
+        return None
+
+    def _resolve_oa_id_for_paper(self, paper: Paper) -> str | None:
+        if paper.id.startswith("oa:"):
+            return paper.id.split(":", 1)[1]
+
+        normalized_doi = (paper.doi or "").replace("https://doi.org/", "").strip().lower()
+        if normalized_doi:
+            for candidate in self._search_oa_with_retry(normalized_doi, limit=8):
+                cand_doi = (candidate.doi or "").replace("https://doi.org/", "").strip().lower()
+                if cand_doi and cand_doi == normalized_doi:
+                    return candidate.id.split(":", 1)[1]
+
+        title = (paper.title or "").strip()
+        if not title:
+            return None
+
+        best_id = None
+        best_score = 0.0
+        for query in self._title_query_variants(title):
+            for candidate in self._search_oa_with_retry(query, limit=8):
+                if not candidate or not candidate.title:
+                    continue
+
+                overlap = self._title_overlap_score(title, candidate.title)
+                score = overlap + (1.0 if titles_match(title, candidate.title) else 0.0)
+                if score > best_score:
+                    best_score = score
+                    best_id = candidate.id.split(":", 1)[1]
+
+                if titles_match(title, candidate.title):
+                    return candidate.id.split(":", 1)[1]
+
+        if best_id and best_score >= 0.75:
+            return best_id
+        return None
+
+    # Backfill candidate pool for citation trees when citation APIs return no results.
+    # These are related papers discovered by title, not guaranteed true citers.
+    def _citation_related_fallback(self, paper: Paper, target_pool: int) -> List[Paper]:
+        title = (paper.title or "").strip()
+        if not title:
+            return []
+
+        related: list[Paper] = []
+        seen_ids: set[str] = set()
+        seen_titles: set[str] = set()
+
+        for query in self._title_query_variants(title):
+            for candidate in self._search_s2_with_retry(query, limit=target_pool):
+                if not candidate or not candidate.title:
+                    continue
+                if self._is_same_paper(paper, candidate):
+                    continue
+                if paper.year is not None and candidate.year is not None and candidate.year < paper.year:
+                    continue
+
+                th = title_hash(candidate.title)
+                if candidate.id in seen_ids or th in seen_titles:
+                    continue
+
+                candidate.relation_type = "related"
+                related.append(candidate)
+                seen_ids.add(candidate.id)
+                seen_titles.add(th)
+
+                if len(related) >= target_pool:
+                    break
+
+            if len(related) >= target_pool:
+                break
+
+            for candidate in self._search_oa_with_retry(query, limit=target_pool):
+                if not candidate or not candidate.title:
+                    continue
+                if self._is_same_paper(paper, candidate):
+                    continue
+                if paper.year is not None and candidate.year is not None and candidate.year < paper.year:
+                    continue
+
+                th = title_hash(candidate.title)
+                if candidate.id in seen_ids or th in seen_titles:
+                    continue
+
+                candidate.relation_type = "related"
+                related.append(candidate)
+                seen_ids.add(candidate.id)
+                seen_titles.add(th)
+
+                if len(related) >= target_pool:
+                    break
+
+            if len(related) >= target_pool:
+                break
+
+        related.sort(
+            key=lambda p: (self._title_overlap_score(title, p.title), p.citations_count or 0),
+            reverse=True,
+        )
+        return related[:target_pool]
     
     # retrieves the citations for a paper by looking up its ID and title across multiple APIs
     def _get_citations(self, paper: Paper, limit: int = API_CITATION_LIMIT) -> List[Paper]:
         citations: List[Paper] = []
 
-        s2_id = None
-
-        if paper.id.startswith("s2:"):
-            s2_id = paper.id.split(":", 1)[1]
-
-        elif paper.arxiv_id:
-            s2_paper = self.s2.get_by_arxiv(paper.arxiv_id)
-            if s2_paper:
-                s2_id = s2_paper.id.split(":", 1)[1]
-
-        if not s2_id and paper.title:
-            for p in self.s2.search(paper.title, limit=3):
-                if titles_match(paper.title, p.title):
-                    s2_id = p.id.split(":", 1)[1]
-                    break
-        oa_id = None
-        if paper.id.startswith("oa:"):
-            oa_id = paper.id.split(":", 1)[1]
-        elif paper.title:
-            for p in self.oa.search(paper.title, limit=3):
-                if titles_match(paper.title, p.title):
-                    oa_id = p.id.split(":", 1)[1]
-                    break
+        s2_id = self._resolve_s2_id_for_paper(paper)
+        oa_id = self._resolve_oa_id_for_paper(paper)
 
         def _fetch_s2() -> list[Paper]:
             if not s2_id:
@@ -646,7 +810,18 @@ class TreeBuilder:
         print(f"{indent}[depth {paper.depth}] {paper.title[:50]}…")
 
         related = self._get_citations(paper)
-        print(f"{indent}  Found {len(related)} citations")
+        used_related_fallback = False
+        if not related and paper.title:
+            target_pool = max(MAX_CHILDREN_PER_NODE * 4, 12)
+            related = self._citation_related_fallback(paper, target_pool=target_pool)
+            used_related_fallback = bool(related)
+
+        if used_related_fallback:
+            print(
+                f"{indent}  Found 0 direct citations; using {len(related)} related-paper fallbacks"
+            )
+        else:
+            print(f"{indent}  Found {len(related)} citations")
 
         if DEBUG_PRINT_ALL_CITERS and related:
             print(f"{indent}  All citing-paper candidates for parent:")
@@ -765,6 +940,48 @@ class TreeBuilder:
                     f"cites={p.citations_count or 0} id={p.id} title={p.title}"
                 )
 
+        # If strict citation filtering leaves too few children, keep top remaining
+        # candidates with relaxed constraints so trees are not empty on sparse/new papers.
+        if len(to_add) < MAX_CHILDREN_PER_NODE and related:
+            seen_ids = {p.id for p, _sc, _sim in to_add}
+            seen_titles = {title_hash(p.title) for p, _sc, _sim in to_add}
+
+            for p, rel_score in self._score(paper, related):
+                if len(to_add) >= MAX_CHILDREN_PER_NODE:
+                    break
+                if not p or not p.title:
+                    continue
+                if self._is_same_paper(paper, p) or self._is_same_paper(tree.root, p):
+                    continue
+                if paper.year is not None and p.year is not None and p.year < paper.year:
+                    continue
+
+                th = title_hash(p.title)
+                if p.id in seen_ids or th in seen_titles:
+                    continue
+                if p.id in self.visited or th in self.title_hashes:
+                    continue
+
+                p.depth = paper.depth + 1
+                p.parent_id = paper.id
+                sim = compute_similarity(
+                    paper.abstract or paper.title,
+                    p.abstract or p.title,
+                )
+                if not self.similarity_available:
+                    sim = min(1.0, max(rel_score, self.min_rel))
+
+                p.relevance_score = max(rel_score, self.min_rel)
+                p.similarity_to_parent = sim
+                if p.relation_type not in ("citation", "related"):
+                    p.relation_type = "related"
+
+                to_add.append((p, p.relevance_score, sim))
+                self.visited.add(p.id)
+                self.title_hashes.add(th)
+                seen_ids.add(p.id)
+                seen_titles.add(th)
+
         # Prefer oldest valid citing papers first to avoid recency-skewed
         # citation pages (for example, many same-year fresh uploads), then break ties
         # by semantic similarity/relevance.
@@ -806,7 +1023,7 @@ class TreeBuilder:
 
         for child, _sc, _sim in to_add:
             tree.papers[child.id] = child
-            tree.edges.append((paper.id, child.id, "citation"))
+            tree.edges.append((paper.id, child.id, child.relation_type or "citation"))
             self._expand_citations(tree, child)
 
 

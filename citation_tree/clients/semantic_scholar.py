@@ -53,6 +53,23 @@ class S2Client(BaseClient):
             f"s2:a:{arxiv_id}", fetch, "S2 arXiv", multi=False
         )
 
+    def get_by_doi(self, doi: str) -> Paper | None:
+        normalized = (doi or "").replace("https://doi.org/", "").strip()
+        if not normalized:
+            return None
+
+        def fetch():
+            r = self._get(
+                f"{SEMANTIC_SCHOLAR_API}/paper/DOI:{normalized}",
+                params={"fields": self._F},
+                timeout=30,
+            )
+            return self._parse(r.json()) if r.status_code == 200 else None
+
+        return self._request(
+            f"s2:d:{normalized}", fetch, "S2 DOI", multi=False
+        )
+
     # fetches related papers (references or citations) with pagination in case of too many citations/references
     def _get_related(self, paper_id: str, endpoint: str, nested_key: str, rel: str, limit: int,) -> List[Paper]:
         def fetch():

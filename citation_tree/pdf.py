@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import io
 import os
 import re
 import time
 from threading import Lock
 from typing import List
+from urllib.parse import unquote, urljoin, urlparse
 
 
 import requests
@@ -35,6 +37,12 @@ _TIKA_LOCK = Lock()
 
 # Used for paper ids - checks if the id is of the form of an arxiv id
 _ARXIV_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?", re.I)
+_HREF_RE = re.compile(r"href=[\"']([^\"']+)[\"']", re.I)
+_META_PDF_RE = re.compile(
+    r"<meta[^>]+(?:name|property)=[\"'](?:citation_pdf_url|og:pdf|dc.identifier)[\"'][^>]+content=[\"']([^\"']+)[\"']",
+    re.I,
+)
+_DIRECT_PDF_RE = re.compile(r"https?://[^\"'\s>]+\.pdf(?:\?[^\"'\s>]*)?", re.I)
 
 # Cleans the arxiv id by extracting the base and version and normalizing it to a standard format 
 def normalize_arxiv_id(arxiv_id: str | None) -> str | None:
@@ -46,6 +54,188 @@ def normalize_arxiv_id(arxiv_id: str | None) -> str | None:
     base = m.group(1)
     version = m.group(2) or ""
     return f"{base}{version}"
+
+
+def _is_http_url(value: str) -> bool:
+    try:
+        parsed = urlparse((value or "").strip())
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _safe_pdf_filename(source_url: str, response_url: str | None = None) -> str:
+    for candidate in (response_url or "", source_url):
+        parsed = urlparse(candidate)
+        name = os.path.basename(unquote(parsed.path or "")).strip()
+        if name and name.lower().endswith(".pdf"):
+            clean = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+            if clean and clean.lower().endswith(".pdf"):
+                return clean
+
+    digest = hashlib.md5(source_url.encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return f"remote_{digest}.pdf"
+
+
+def _extract_pdf_candidates_from_html(page_url: str, html: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw_url: str | None) -> None:
+        if not raw_url:
+            return
+
+        norm = raw_url.strip()
+        if not norm:
+            return
+        if norm.startswith("//"):
+            norm = f"https:{norm}"
+
+        resolved = urljoin(page_url, norm)
+
+        m = re.search(r"arxiv\.org/abs/(\d{4}\.\d{4,5}(?:v\d+)?)", resolved, re.I)
+        if m:
+            resolved = f"https://arxiv.org/pdf/{m.group(1)}.pdf"
+
+        if not _is_http_url(resolved):
+            return
+        if resolved in seen:
+            return
+
+        seen.add(resolved)
+        candidates.append(resolved)
+
+    for match in _META_PDF_RE.findall(html):
+        _add(match)
+
+    for match in _DIRECT_PDF_RE.findall(html):
+        _add(match)
+
+    for href in _HREF_RE.findall(html):
+        low = href.lower()
+        if ".pdf" in low or "download" in low or "fulltext" in low:
+            _add(href)
+
+    return candidates
+
+
+def download_pdf_from_url(source_url: str, pdfs_dir: str, timeout: int = 30) -> str | None:
+    if not _is_http_url(source_url):
+        return None
+
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; citation-tree-bot/1.0)"}
+    os.makedirs(pdfs_dir, exist_ok=True)
+
+    queue: list[str] = [source_url]
+    visited: set[str] = set()
+    last_error = None
+
+    m = re.search(r"arxiv\.org/abs/(\d{4}\.\d{4,5}(?:v\d+)?)", source_url, re.I)
+    if m:
+        queue.insert(0, f"https://arxiv.org/pdf/{m.group(1)}.pdf")
+
+    while queue:
+        url = queue.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+
+        try:
+            resp = GlobalRequestGate.request(
+                requests,
+                "GET",
+                url,
+                group="pdf",
+                min_interval=0.0,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=True,
+                stream=True,
+            )
+            resp.raise_for_status()
+
+            content_type = (resp.headers.get("Content-Type") or "").lower()
+            is_pdf = (
+                "application/pdf" in content_type
+                or url.lower().endswith(".pdf")
+                or (resp.url or "").lower().endswith(".pdf")
+            )
+
+            if not is_pdf:
+                html_chunks: list[bytes] = []
+                total = 0
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    html_chunks.append(chunk)
+                    total += len(chunk)
+                    if total >= 400_000:
+                        break
+                resp.close()
+
+                html = b"".join(html_chunks).decode("utf-8", errors="ignore")
+                next_urls = _extract_pdf_candidates_from_html(resp.url or url, html)
+                for next_url in next_urls:
+                    if next_url not in visited and next_url not in queue:
+                        queue.append(next_url)
+                continue
+
+            filename = _safe_pdf_filename(url, resp.url)
+            local_path = os.path.join(pdfs_dir, filename)
+
+            if os.path.exists(local_path):
+                resp.close()
+                return local_path
+
+            first_bytes = b""
+            with open(local_path, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    if len(first_bytes) < 8:
+                        need = 8 - len(first_bytes)
+                        first_bytes += chunk[:need]
+                    fh.write(chunk)
+            resp.close()
+
+            if not first_bytes.startswith(b"%PDF"):
+                try:
+                    os.remove(local_path)
+                except OSError:
+                    pass
+                continue
+
+            return local_path
+
+        except Exception as exc:
+            last_error = exc
+
+    if last_error is not None:
+        print(f"  Remote PDF download failed ({source_url}): {last_error}")
+    else:
+        print(f"  Could not find a downloadable PDF at: {source_url}")
+    return None
+
+
+def resolve_pdf_source(source: str, pdfs_dir: str) -> tuple[str | None, str | None]:
+    candidate = (source or "").strip()
+    if not candidate:
+        return None, "no PDF source provided"
+
+    if _is_http_url(candidate):
+        local_path = download_pdf_from_url(candidate, pdfs_dir)
+        if local_path:
+            return local_path, None
+        return None, f"could not download a PDF from URL - {candidate}"
+
+    if os.path.exists(candidate):
+        return candidate, None
+
+    fallback = os.path.join(pdfs_dir, candidate)
+    if os.path.exists(fallback):
+        return fallback, None
+
+    return None, f"file not found - {candidate}"
 
 
 def _get_pytesseract_module():
