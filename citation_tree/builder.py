@@ -173,7 +173,7 @@ class TreeBuilder:
             if (paper.abstract or "").strip():
                 continue
 
-            looked_up = self._lookup(paper.title, paper.arxiv_id)
+            looked_up = self._lookup_with_abstract(paper.title, paper.arxiv_id)
             if looked_up and (looked_up.abstract or "").strip():
                 paper.abstract = looked_up.abstract
                 if not paper.arxiv_id and looked_up.arxiv_id:
@@ -188,6 +188,13 @@ class TreeBuilder:
                 if inferred:
                     paper.abstract = inferred
                     print(f"    {paper.title[:50]}… [LLM abstract]")
+                    continue
+
+            # Keep abstracts non-empty when metadata/PDF extraction fails.
+            paper.abstract = (
+                f"Abstract unavailable from source metadata and PDF extraction for '{paper.title}'."
+            )
+            print(f"    {paper.title[:50]}… [fallback abstract]")
 
         print("\n  Generating improvement explanations")
         for paper in tree.papers.values():
@@ -263,6 +270,36 @@ class TreeBuilder:
                         return p
 
         return None
+
+    # Returns the best match with a non-empty abstract when available.
+    def _lookup_with_abstract(self, title: str, arxiv_id: str | None = None) -> Paper | None:
+        direct = self._lookup(title, arxiv_id)
+        if direct and (direct.abstract or "").strip():
+            return direct
+
+        if not title:
+            return None
+
+        query_variants: list[str] = []
+        for q in (title, " ".join(title.split()[:10])):
+            q = (q or "").strip()
+            if q and q not in query_variants:
+                query_variants.append(q)
+
+        for query in query_variants:
+            for client in (self.s2, self.oa, self.arxiv):
+                if client is self.arxiv:
+                    candidates = client.search(query, max_results=8)
+                else:
+                    candidates = client.search(query, limit=8)
+
+                for candidate in candidates:
+                    if not candidate or not candidate.title:
+                        continue
+                    if titles_match(title, candidate.title) and (candidate.abstract or "").strip():
+                        return candidate
+
+        return direct
 
     # Recursively expands the tree by looking up references and related papers, scoring them, 
     # and adding the most relevant ones as child nodes.
@@ -350,25 +387,34 @@ class TreeBuilder:
             seen_titles = {title_hash(p.title) for p in related if p and p.title}
             target_pool = max(MAX_CHILDREN_PER_NODE * 4, 12)
 
+            query_variants: list[str] = []
+            for q in (paper.title, " ".join(paper.title.split()[:10])):
+                q = (q or "").strip()
+                if q and q not in query_variants:
+                    query_variants.append(q)
+
             for client in (self.s2, self.oa, self.arxiv):
-                if client is self.arxiv:
-                    found_candidates = client.search(paper.title, max_results=target_pool)
-                else:
-                    found_candidates = client.search(paper.title, limit=target_pool)
+                for query in query_variants:
+                    if client is self.arxiv:
+                        found_candidates = client.search(query, max_results=target_pool)
+                    else:
+                        found_candidates = client.search(query, limit=target_pool)
 
-                for candidate in found_candidates:
-                    if not candidate or not candidate.title:
-                        continue
+                    for candidate in found_candidates:
+                        if not candidate or not candidate.title:
+                            continue
 
-                    th = title_hash(candidate.title)
-                    if candidate.id in seen_ids or th in seen_titles:
-                        continue
+                        th = title_hash(candidate.title)
+                        if candidate.id in seen_ids or th in seen_titles:
+                            continue
 
-                    candidate.relation_type = "reference"
-                    related.append(candidate)
-                    seen_ids.add(candidate.id)
-                    seen_titles.add(th)
+                        candidate.relation_type = "reference"
+                        related.append(candidate)
+                        seen_ids.add(candidate.id)
+                        seen_titles.add(th)
 
+                        if len(related) >= target_pool:
+                            break
                     if len(related) >= target_pool:
                         break
                 if len(related) >= target_pool:

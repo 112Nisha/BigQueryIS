@@ -75,12 +75,19 @@ def _get_client() -> OpenAI | None:
         )
     return st.llm_client
 
-# returns the text used for summaries, prefers abstracts first
+# returns the text used for summaries, prefers full paper text first
 def _select_text_for_summary(paper: Paper) -> str:
-    base = (paper.abstract or "").strip()
-    if len(base) >= 400:
-        return base[:MAX_TEXT_CHARS_FOR_SUMMARY]
-    return (paper.full_text or paper.abstract or paper.title or "").strip()[:MAX_TEXT_CHARS_FOR_SUMMARY]
+    full_text = (paper.full_text or "").strip()
+    if full_text:
+        # Keep enough text to let chunk-based summarization use configured chunk limits.
+        max_chars = max(MAX_TEXT_CHARS_FOR_SUMMARY, MAX_SUMMARY_CHUNKS * SUMMARY_CHUNK_SIZE)
+        return full_text[:max_chars]
+
+    abstract = (paper.abstract or "").strip()
+    if abstract:
+        return abstract[:MAX_TEXT_CHARS_FOR_SUMMARY]
+
+    return (paper.title or "").strip()[:MAX_TEXT_CHARS_FOR_SUMMARY]
 
 # returns a list of chunks of text
 def _chunk_text(text: str, chunk_size: int = SUMMARY_CHUNK_SIZE):
