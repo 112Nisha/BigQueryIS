@@ -302,18 +302,34 @@ class TreeBuilder:
         if title:
             best_match: Paper | None = None
             best_score = 0.0
+            best_citations = -1
+            best_year = 9999
             for client in (self.s2, self.oa):
                 for p in client.search(title, limit=8):
                     if not p or not p.title:
                         continue
 
                     score = self._title_match_confidence(title, p.title)
-                    if score > best_score:
+                    cand_citations = p.citations_count or 0
+                    cand_year = p.year if p.year is not None else 9999
+
+                    if (
+                        score > best_score + 1e-9
+                        or (
+                            abs(score - best_score) <= 0.02
+                            and (
+                                cand_citations > best_citations
+                                or (
+                                    cand_citations == best_citations
+                                    and cand_year < best_year
+                                )
+                            )
+                        )
+                    ):
                         best_score = score
                         best_match = p
-
-                    if titles_match(title, p.title) and score >= 1.0:
-                        return p
+                        best_citations = cand_citations
+                        best_year = cand_year
 
             if best_match and best_score >= 0.90:
                 return best_match
@@ -707,18 +723,34 @@ class TreeBuilder:
 
         best_id = None
         best_score = 0.0
+        best_citations = -1
+        best_year = 9999
         for query in self._title_query_variants(title):
             for candidate in self._search_s2_with_retry(query, limit=8):
                 if not candidate or not candidate.title:
                     continue
 
                 score = self._title_match_confidence(title, candidate.title)
-                if score > best_score:
+                cand_citations = candidate.citations_count or 0
+                cand_year = candidate.year if candidate.year is not None else 9999
+
+                if (
+                    score > best_score + 1e-9
+                    or (
+                        abs(score - best_score) <= 0.02
+                        and (
+                            cand_citations > best_citations
+                            or (
+                                cand_citations == best_citations
+                                and cand_year < best_year
+                            )
+                        )
+                    )
+                ):
                     best_score = score
                     best_id = candidate.id.split(":", 1)[1]
-
-                if titles_match(title, candidate.title) and score >= 1.0:
-                    return candidate.id.split(":", 1)[1]
+                    best_citations = cand_citations
+                    best_year = cand_year
 
         if best_id and best_score >= 0.90:
             return best_id
@@ -741,18 +773,34 @@ class TreeBuilder:
 
         best_id = None
         best_score = 0.0
+        best_citations = -1
+        best_year = 9999
         for query in self._title_query_variants(title):
             for candidate in self._search_oa_with_retry(query, limit=8):
                 if not candidate or not candidate.title:
                     continue
 
                 score = self._title_match_confidence(title, candidate.title)
-                if score > best_score:
+                cand_citations = candidate.citations_count or 0
+                cand_year = candidate.year if candidate.year is not None else 9999
+
+                if (
+                    score > best_score + 1e-9
+                    or (
+                        abs(score - best_score) <= 0.02
+                        and (
+                            cand_citations > best_citations
+                            or (
+                                cand_citations == best_citations
+                                and cand_year < best_year
+                            )
+                        )
+                    )
+                ):
                     best_score = score
                     best_id = candidate.id.split(":", 1)[1]
-
-                if titles_match(title, candidate.title) and score >= 1.0:
-                    return candidate.id.split(":", 1)[1]
+                    best_citations = cand_citations
+                    best_year = cand_year
 
         if best_id and best_score >= 0.90:
             return best_id
@@ -775,8 +823,6 @@ class TreeBuilder:
                     continue
                 if self._is_same_paper(paper, candidate):
                     continue
-                if paper.year is not None and candidate.year is not None and candidate.year < paper.year:
-                    continue
 
                 th = title_hash(candidate.title)
                 if candidate.id in seen_ids or th in seen_titles:
@@ -797,8 +843,6 @@ class TreeBuilder:
                 if not candidate or not candidate.title:
                     continue
                 if self._is_same_paper(paper, candidate):
-                    continue
-                if paper.year is not None and candidate.year is not None and candidate.year < paper.year:
                     continue
 
                 th = title_hash(candidate.title)
@@ -1006,6 +1050,7 @@ class TreeBuilder:
         if len(to_add) < MAX_CHILDREN_PER_NODE and related:
             seen_ids = {p.id for p, _sc, _sim in to_add}
             seen_titles = {title_hash(p.title) for p, _sc, _sim in to_add}
+            allow_older_in_relaxed = len(to_add) == 0
 
             for p, rel_score in self._score(paper, related):
                 if len(to_add) >= MAX_CHILDREN_PER_NODE:
@@ -1014,7 +1059,12 @@ class TreeBuilder:
                     continue
                 if self._is_same_paper(paper, p) or self._is_same_paper(tree.root, p):
                     continue
-                if paper.year is not None and p.year is not None and p.year < paper.year:
+                if (
+                    not allow_older_in_relaxed
+                    and paper.year is not None
+                    and p.year is not None
+                    and p.year < paper.year
+                ):
                     continue
 
                 th = title_hash(p.title)

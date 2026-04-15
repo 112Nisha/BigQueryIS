@@ -46,11 +46,11 @@ OPENALEX_API = "https://api.openalex.org"
 INPUT_PDF = os.getenv("INPUT_PDF", os.path.join(PDFS_DIR, "1211.3711v1.pdf"))
 
 # Tree parameters
-MAX_DEPTH = _env_int("MAX_DEPTH", 2)
-MAX_PAPERS = _env_int("MAX_PAPERS", 60)
+MAX_DEPTH = _env_int("MAX_DEPTH", 3)
+MAX_PAPERS = _env_int("MAX_PAPERS", 20)
 MIN_RELEVANCE = _env_float("MIN_RELEVANCE", 0.15)
 # Root -> top_k children -> each child -> top_k children (when MAX_DEPTH=2)
-MAX_CHILDREN_PER_NODE = _env_int("MAX_CHILDREN_PER_NODE", 2)
+MAX_CHILDREN_PER_NODE = _env_int("MAX_CHILDREN_PER_NODE", 5)
 
 # Per-node retrieval breadth (higher values improve coverage but cost more API calls)
 API_REFERENCE_LIMIT = _env_int("API_REFERENCE_LIMIT", 50)

@@ -98,8 +98,8 @@
   </head>
   <body>
     <main class="card">
-      <h1>Build a Citation Tree from a PDF</h1>
-      <p>Upload a PDF and the app will generate interactive HTML views from the uploaded file.</p>
+      <h1>Build Reference and Citation Tree from a research paper PDF</h1>
+      <p>Upload a research paper PDF and the app will generate interactive HTML views from the uploaded file.</p>
 
       {% if error %}
       <div class="error">{{ error }}</div>
@@ -117,7 +117,7 @@
         <button type="submit">Generate HTML</button>
       </form>
 
-      <p class="hint"><strong>Note:</strong> First runs can take a while because models and parsers warm up.</p>
+      <p class="hint"><strong>Note:</strong> Runs can take up to 45 minutes.</p>
     </main>
   </body>
 </html>
