@@ -8,6 +8,7 @@ import traceback
 import uuid
 from pathlib import Path
 from typing import Any
+from werkzeug.utils import secure_filename
 
 _flask = importlib.import_module("flask")
 Flask = _flask.Flask
@@ -100,15 +101,30 @@ def index():
 
 @app.post("/jobs")
 def create_job():
-    source = (request.form.get("source") or "").strip()
-    if not source:
-        return render_template("index.html", error="Please enter a paper link or PDF path."), 400
+    uploaded_pdf = request.files.get("pdf_file")
+    if uploaded_pdf is None or not (uploaded_pdf.filename or "").strip():
+        return render_template("index.html", error="Please upload a PDF file."), 400
+
+    original_name = secure_filename(uploaded_pdf.filename)
+    if not original_name or not original_name.lower().endswith(".pdf"):
+        return render_template("index.html", error="Only .pdf uploads are supported."), 400
 
     job_id = uuid.uuid4().hex[:12]
+    job_dir = _job_output_dir(job_id)
+    source_path = job_dir / "input.pdf"
+
+    try:
+        uploaded_pdf.save(source_path)
+    except Exception:
+        return render_template("index.html", error="Could not save the uploaded PDF."), 400
+
+    if not source_path.exists() or source_path.stat().st_size == 0:
+        return render_template("index.html", error="Uploaded PDF is empty."), 400
+
     with JOBS_LOCK:
         JOBS[job_id] = {
             "id": job_id,
-            "source": source,
+            "source": original_name,
             "status": "queued",
             "has_reference": False,
             "has_citation": False,
@@ -116,7 +132,11 @@ def create_job():
             "traceback": None,
         }
 
-    worker = threading.Thread(target=_run_generation_job, args=(job_id, source), daemon=True)
+    worker = threading.Thread(
+        target=_run_generation_job,
+        args=(job_id, str(source_path)),
+        daemon=True,
+    )
     worker.start()
 
     return redirect(url_for("job_status", job_id=job_id))

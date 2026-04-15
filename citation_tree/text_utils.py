@@ -32,4 +32,16 @@ def titles_match(a: str, b: str) -> bool:
     wa, wb = important_words(a), important_words(b)
     if not wa or not wb:
         return False
-    return len(wa & wb) / max(1, min(len(wa), len(wb))) > 0.5
+
+    inter = len(wa & wb)
+    overlap_min = inter / max(1, min(len(wa), len(wb)))
+    overlap_jaccard = inter / max(1, len(wa | wb))
+    length_ratio = min(len(wa), len(wb)) / max(1, max(len(wa), len(wb)))
+
+    # Avoid matching short/base titles to longer derivative titles by requiring
+    # both strong token overlap and comparable title lengths.
+    if overlap_min >= 0.95 and overlap_jaccard >= 0.80:
+        return True
+    if overlap_min >= 0.85 and overlap_jaccard >= 0.70 and length_ratio >= 0.75:
+        return True
+    return False

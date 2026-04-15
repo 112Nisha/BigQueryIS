@@ -300,10 +300,23 @@ class TreeBuilder:
             if p:
                 return p
         if title:
+            best_match: Paper | None = None
+            best_score = 0.0
             for client in (self.s2, self.oa):
-                for p in client.search(title, limit=3):
-                    if titles_match(title, p.title):
+                for p in client.search(title, limit=8):
+                    if not p or not p.title:
+                        continue
+
+                    score = self._title_match_confidence(title, p.title)
+                    if score > best_score:
+                        best_score = score
+                        best_match = p
+
+                    if titles_match(title, p.title) and score >= 1.0:
                         return p
+
+            if best_match and best_score >= 0.90:
+                return best_match
 
         return None
 
@@ -620,6 +633,20 @@ class TreeBuilder:
         return len(wa & wb) / max(1, min(len(wa), len(wb)))
 
     @staticmethod
+    def _title_match_confidence(a: str, b: str) -> float:
+        wa, wb = important_words(a or ""), important_words(b or "")
+        if not wa or not wb:
+            return 0.0
+
+        inter = len(wa & wb)
+        overlap_min = inter / max(1, min(len(wa), len(wb)))
+        overlap_jaccard = inter / max(1, len(wa | wb))
+        length_ratio = min(len(wa), len(wb)) / max(1, max(len(wa), len(wb)))
+        exactish_bonus = 0.20 if titles_match(a, b) else 0.0
+
+        return (overlap_min * 0.45) + (overlap_jaccard * 0.40) + (length_ratio * 0.15) + exactish_bonus
+
+    @staticmethod
     def _title_query_variants(title: str) -> list[str]:
         raw = (title or "").strip()
         if not raw:
@@ -685,16 +712,15 @@ class TreeBuilder:
                 if not candidate or not candidate.title:
                     continue
 
-                overlap = self._title_overlap_score(title, candidate.title)
-                score = overlap + (1.0 if titles_match(title, candidate.title) else 0.0)
+                score = self._title_match_confidence(title, candidate.title)
                 if score > best_score:
                     best_score = score
                     best_id = candidate.id.split(":", 1)[1]
 
-                if titles_match(title, candidate.title):
+                if titles_match(title, candidate.title) and score >= 1.0:
                     return candidate.id.split(":", 1)[1]
 
-        if best_id and best_score >= 0.75:
+        if best_id and best_score >= 0.90:
             return best_id
         return None
 
@@ -720,16 +746,15 @@ class TreeBuilder:
                 if not candidate or not candidate.title:
                     continue
 
-                overlap = self._title_overlap_score(title, candidate.title)
-                score = overlap + (1.0 if titles_match(title, candidate.title) else 0.0)
+                score = self._title_match_confidence(title, candidate.title)
                 if score > best_score:
                     best_score = score
                     best_id = candidate.id.split(":", 1)[1]
 
-                if titles_match(title, candidate.title):
+                if titles_match(title, candidate.title) and score >= 1.0:
                     return candidate.id.split(":", 1)[1]
 
-        if best_id and best_score >= 0.75:
+        if best_id and best_score >= 0.90:
             return best_id
         return None
 

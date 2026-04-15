@@ -11,7 +11,7 @@ Discovers related papers via **Semantic Scholar**, **arXiv**, and **OpenAlex**, 
 - **ML-powered explanations** — Groq and/or Gemini generate improvement summaries between parent and child papers
 - **Semantic similarity** — sentence-transformers cosine similarity scores
 - **Interactive HTML output** — dark-themed, searchable, with detail panel
-- **Simple web UI** — paste a paper link, wait on a loading page, then view generated HTML with a back-to-home button
+- **Simple web UI** — upload a PDF, wait on a loading page, then view generated HTML with a back-to-home button
 
 ## Setup
 
@@ -118,7 +118,7 @@ http://localhost:8000
 ```
 
 What the web app does:
-- asks for a paper URL (or local PDF path)
+- accepts a PDF upload
 - shows a loading/status page while trees are built
 - opens a result page with the generated HTML embedded
 - includes a persistent **Back to start** button
@@ -197,7 +197,7 @@ This repo now includes `render.yaml` + `Dockerfile`, so Render can deploy it dir
     - Optional additional API keys: `GEMINI_API_KEY`, `SEMANTIC_SCHOLAR_API_KEY`, `OPENALEX_API_KEY`.
 6. Deploy. After the build finishes, Render gives you a public URL like:
     - `https://bigqueryis-web.onrender.com`
-7. Share that URL. Users can open it, submit a paper link, and use the generated HTML views.
+7. Share that URL. Users can open it, upload a PDF, and use the generated HTML views.
 
 Memory note:
 - `render.yaml` sets `LOW_MEMORY_MODE=true` by default for safer free-tier deploys.

@@ -98,21 +98,21 @@
   </head>
   <body>
     <main class="card">
-      <h1>Build a Citation Tree from a Link</h1>
-      <p>Paste a paper URL (or local PDF path on this machine), and the app will generate interactive HTML views.</p>
+      <h1>Build a Citation Tree from a PDF</h1>
+      <p>Upload a PDF and the app will generate interactive HTML views from the uploaded file.</p>
 
       {% if error %}
       <div class="error">{{ error }}</div>
       {% endif %}
 
-      <form action="{{ url_for('create_job') }}" method="post">
-        <label for="source">Paper URL or PDF path</label>
+      <form action="{{ url_for('create_job') }}" method="post" enctype="multipart/form-data">
+        <label for="pdf_file">Upload PDF</label>
         <input
-          id="source"
-          name="source"
-          type="text"
+          id="pdf_file"
+          name="pdf_file"
+          type="file"
+          accept=".pdf,application/pdf"
           required
-          placeholder="https://arxiv.org/abs/1706.03762"
         />
         <button type="submit">Generate HTML</button>
       </form>
