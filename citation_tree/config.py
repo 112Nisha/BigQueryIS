@@ -86,6 +86,7 @@ GLOBAL_ARXIV_MIN_INTERVAL = _env_float("GLOBAL_ARXIV_MIN_INTERVAL", 1.2)
 GLOBAL_S2_MIN_INTERVAL = _env_float("GLOBAL_S2_MIN_INTERVAL", 0.8)
 GLOBAL_OA_MIN_INTERVAL = _env_float("GLOBAL_OA_MIN_INTERVAL", 0.25)
 
+<<<<<<< HEAD
 # Provider credentials and contact metadata (env-only for local/dev/prod)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -94,3 +95,8 @@ SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
 OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY", "")
 OPENALEX_MAILTO = os.getenv("OPENALEX_MAILTO", "")
 ARXIV_CONTACT_EMAIL = os.getenv("ARXIV_CONTACT_EMAIL", "")
+=======
+# Google Gemini API (free tier — used for improvement explanations in ml.py)
+# Get a free key at https://aistudio.google.com/app/apikey
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+>>>>>>> 5ed0c3f0 (cleaned code)
