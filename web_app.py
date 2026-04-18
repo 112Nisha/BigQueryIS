@@ -21,18 +21,21 @@ send_from_directory = _flask.send_from_directory
 url_for = _flask.url_for
 
 from citation_tree.config import OUTPUT_DIR
-from citation_tree.main import build_trees
+import citation_tree.main as citation_main
 
 app = Flask(__name__)
 
 JOBS: dict[str, dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
+PIPELINE_LOCK = threading.Lock()
 ALLOWED_OUTPUT_FILES = {
     "reference_tree.html",
     "citation_tree.html",
     "reference_tree.json",
     "citation_tree.json",
 }
+
+UPLOADS_DIR = Path(citation_main.PDFS_DIR) / "uploads"
 
 
 def _jobs_root() -> Path:
@@ -43,6 +46,12 @@ def _jobs_root() -> Path:
 
 def _job_output_dir(job_id: str) -> Path:
     path = _jobs_root() / job_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _job_upload_dir(job_id: str) -> Path:
+    path = UPLOADS_DIR / job_id
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -59,32 +68,37 @@ def _update_job(job_id: str, **updates: Any) -> None:
 
 
 def _run_generation_job(job_id: str, source: str) -> None:
-    _update_job(job_id, status="running")
-
     try:
-        result = build_trees(
-            source=source,
-            output_dir=str(_job_output_dir(job_id)),
-            open_browser=False,
-        )
+        with PIPELINE_LOCK:
+            _update_job(job_id, status="running")
+            previous_input_pdf = citation_main.INPUT_PDF
+            citation_main.INPUT_PDF = source
+            try:
+                result = citation_main.build_trees(
+                    source=None,
+                    output_dir=str(_job_output_dir(job_id)),
+                    open_browser=False,
+                )
+            finally:
+                citation_main.INPUT_PDF = previous_input_pdf
 
-        has_reference = bool(result.get("has_reference"))
-        has_citation = bool(result.get("has_citation"))
+            has_reference = bool(result.get("has_reference"))
+            has_citation = bool(result.get("has_citation"))
 
-        if not has_reference and not has_citation:
+            if not has_reference and not has_citation:
+                _update_job(
+                    job_id,
+                    status="failed",
+                    error="Generation finished but no HTML output was produced.",
+                )
+                return
+
             _update_job(
                 job_id,
-                status="failed",
-                error="Generation finished but no HTML output was produced.",
+                status="completed",
+                has_reference=has_reference,
+                has_citation=has_citation,
             )
-            return
-
-        _update_job(
-            job_id,
-            status="completed",
-            has_reference=has_reference,
-            has_citation=has_citation,
-        )
     except Exception as exc:
         _update_job(
             job_id,
@@ -110,8 +124,7 @@ def create_job():
         return render_template("index.html", error="Only .pdf uploads are supported."), 400
 
     job_id = uuid.uuid4().hex[:12]
-    job_dir = _job_output_dir(job_id)
-    source_path = job_dir / "input.pdf"
+    source_path = _job_upload_dir(job_id) / original_name
 
     try:
         uploaded_pdf.save(source_path)
