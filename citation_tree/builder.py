@@ -635,18 +635,9 @@ class TreeBuilder:
                 sc += min(p.citations_count / 500, 0.15)
             if p.relation_type in ("reference", "citation"):
                 sc += 0.15
-            elif p.relation_type == "related":
-                sc += 0.05
             results.append((p, sc))
             
         return results
-
-    @staticmethod
-    def _title_overlap_score(a: str, b: str) -> float:
-        wa, wb = important_words(a or ""), important_words(b or "")
-        if not wa or not wb:
-            return 0.0
-        return len(wa & wb) / max(1, min(len(wa), len(wb)))
 
     @staticmethod
     def _title_match_confidence(a: str, b: str) -> float:
@@ -806,66 +797,6 @@ class TreeBuilder:
             return best_id
         return None
 
-    # Backfill candidate pool for citation trees when citation APIs return no results.
-    # These are related papers discovered by title, not guaranteed true citers.
-    def _citation_related_fallback(self, paper: Paper, target_pool: int) -> List[Paper]:
-        title = (paper.title or "").strip()
-        if not title:
-            return []
-
-        related: list[Paper] = []
-        seen_ids: set[str] = set()
-        seen_titles: set[str] = set()
-
-        for query in self._title_query_variants(title):
-            for candidate in self._search_s2_with_retry(query, limit=target_pool):
-                if not candidate or not candidate.title:
-                    continue
-                if self._is_same_paper(paper, candidate):
-                    continue
-
-                th = title_hash(candidate.title)
-                if candidate.id in seen_ids or th in seen_titles:
-                    continue
-
-                candidate.relation_type = "related"
-                related.append(candidate)
-                seen_ids.add(candidate.id)
-                seen_titles.add(th)
-
-                if len(related) >= target_pool:
-                    break
-
-            if len(related) >= target_pool:
-                break
-
-            for candidate in self._search_oa_with_retry(query, limit=target_pool):
-                if not candidate or not candidate.title:
-                    continue
-                if self._is_same_paper(paper, candidate):
-                    continue
-
-                th = title_hash(candidate.title)
-                if candidate.id in seen_ids or th in seen_titles:
-                    continue
-
-                candidate.relation_type = "related"
-                related.append(candidate)
-                seen_ids.add(candidate.id)
-                seen_titles.add(th)
-
-                if len(related) >= target_pool:
-                    break
-
-            if len(related) >= target_pool:
-                break
-
-        related.sort(
-            key=lambda p: (self._title_overlap_score(title, p.title), p.citations_count or 0),
-            reverse=True,
-        )
-        return related[:target_pool]
-    
     # retrieves the citations for a paper by looking up its ID and title across multiple APIs
     def _get_citations(self, paper: Paper, limit: int = API_CITATION_LIMIT) -> List[Paper]:
         citations: List[Paper] = []
@@ -915,18 +846,7 @@ class TreeBuilder:
         print(f"{indent}[depth {paper.depth}] {paper.title[:50]}…")
 
         related = self._get_citations(paper)
-        used_related_fallback = False
-        if not related and paper.title:
-            target_pool = max(MAX_CHILDREN_PER_NODE * 4, 12)
-            related = self._citation_related_fallback(paper, target_pool=target_pool)
-            used_related_fallback = bool(related)
-
-        if used_related_fallback:
-            print(
-                f"{indent}  Found 0 direct citations; using {len(related)} related-paper fallbacks"
-            )
-        else:
-            print(f"{indent}  Found {len(related)} citations")
+        print(f"{indent}  Found {len(related)} citations")
 
         if DEBUG_PRINT_ALL_CITERS and related:
             print(f"{indent}  All citing-paper candidates for parent:")
@@ -1084,8 +1004,8 @@ class TreeBuilder:
 
                 p.relevance_score = max(rel_score, self.min_rel)
                 p.similarity_to_parent = sim
-                if p.relation_type not in ("citation", "related"):
-                    p.relation_type = "related"
+                if p.relation_type != "citation":
+                    p.relation_type = "citation"
 
                 to_add.append((p, p.relevance_score, sim))
                 self.visited.add(p.id)

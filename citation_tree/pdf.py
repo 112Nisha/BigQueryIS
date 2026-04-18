@@ -36,7 +36,10 @@ _LEGACY = r"(?P<id>[a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)"
 _TIKA_LOCK = Lock()
 
 # Used for paper ids - checks if the id is of the form of an arxiv id
-_ARXIV_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(v\d+)?", re.I)
+_ARXIV_ID_RE = re.compile(
+    r"(?:(?P<modern>\d{4}\.\d{4,5})(?P<modern_v>v\d+)?|(?P<legacy>[a-z\-]+(?:\.[A-Z]{2})?/\d{7})(?P<legacy_v>v\d+)?)",
+    re.I,
+)
 _HREF_RE = re.compile(r"href=[\"']([^\"']+)[\"']", re.I)
 _META_PDF_RE = re.compile(
     r"<meta[^>]+(?:name|property)=[\"'](?:citation_pdf_url|og:pdf|dc.identifier)[\"'][^>]+content=[\"']([^\"']+)[\"']",
@@ -48,12 +51,15 @@ _DIRECT_PDF_RE = re.compile(r"https?://[^\"'\s>]+\.pdf(?:\?[^\"'\s>]*)?", re.I)
 def normalize_arxiv_id(arxiv_id: str | None) -> str | None:
     if not arxiv_id:
         return None
-    m = _ARXIV_ID_RE.search(arxiv_id)
+    compact = re.sub(r"\s+", "", arxiv_id)
+    m = _ARXIV_ID_RE.search(compact)
     if not m:
         return None
-    base = m.group(1)
-    version = m.group(2) or ""
-    return f"{base}{version}"
+    if m.group("modern"):
+        return f"{m.group('modern')}{m.group('modern_v') or ''}"
+    if m.group("legacy"):
+        return f"{m.group('legacy')}{m.group('legacy_v') or ''}"
+    return None
 
 
 def _is_http_url(value: str) -> bool:
@@ -514,6 +520,18 @@ def _search_arxiv(text: str) -> str | None:
 
     for p in patterns:
         m = re.search(p, text, re.I)
+        if m:
+            return m.group("id")
+
+    # Fallback for OCR/parsed text that inserts spaces between characters,
+    # e.g. "ar X iv :2 00 1. 00 55 9v 1".
+    compact = re.sub(r"\s+", "", text)
+    compact_patterns = [
+        r"arXiv[:：]?(?P<id>\d{4}\.\d{4,5}(?:v\d+)?)",
+        r"arXiv[:：]?(?P<id>[a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?)",
+    ]
+    for p in compact_patterns:
+        m = re.search(p, compact, re.I)
         if m:
             return m.group("id")
     return None
