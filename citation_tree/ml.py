@@ -154,8 +154,7 @@ def _select_text_for_summary(paper: Paper) -> str:
     full_text = (paper.full_text or "").strip()
     if full_text:
         # Keep enough text to let chunk-based summarization use configured chunk limits.
-        max_chars = max(MAX_TEXT_CHARS_FOR_SUMMARY, MAX_SUMMARY_CHUNKS * SUMMARY_CHUNK_SIZE)
-        return full_text[:max_chars]
+        return full_text[:MAX_TEXT_CHARS_FOR_SUMMARY]
 
     abstract = (paper.abstract or "").strip()
     if abstract:

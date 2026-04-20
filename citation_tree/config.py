@@ -29,6 +29,21 @@ def _env_float(name: str, default: float) -> float:
     except ValueError:
         return default
 
+
+def _env_str(name: str, default: str = "") -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip()
+
+
+def _env_secret(name: str) -> str:
+    # Hosted secret UIs often preserve surrounding quotes from pasted shell snippets.
+    value = _env_str(name, "")
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1].strip()
+    return value
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDFS_DIR = os.path.join(BASE_DIR, "pdfs")
 CACHE_DIR = os.path.join(BASE_DIR, ".cache")
@@ -43,14 +58,14 @@ ARXIV_API = "http://export.arxiv.org/api/query"
 OPENALEX_API = "https://api.openalex.org"
 
 # Default input — change this to any file inside pdfs/
-INPUT_PDF = os.getenv("INPUT_PDF", os.path.join(PDFS_DIR, "1211.3711v1.pdf"))
+INPUT_PDF = _env_str("INPUT_PDF", os.path.join(PDFS_DIR, "1211.3711v1.pdf"))
 
 # Tree parameters
 MAX_DEPTH = _env_int("MAX_DEPTH", 3)
 MAX_PAPERS = _env_int("MAX_PAPERS", 20)
 MIN_RELEVANCE = _env_float("MIN_RELEVANCE", 0.15)
 # Root -> top_k children -> each child -> top_k children (when MAX_DEPTH=2)
-MAX_CHILDREN_PER_NODE = _env_int("MAX_CHILDREN_PER_NODE", 5)
+MAX_CHILDREN_PER_NODE = _env_int("MAX_CHILDREN_PER_NODE", 3)
 
 # Per-node retrieval breadth (higher values improve coverage but cost more API calls)
 API_REFERENCE_LIMIT = _env_int("API_REFERENCE_LIMIT", 50)
@@ -62,12 +77,12 @@ RATE_LIMIT = _env_float("RATE_LIMIT", 1.2)
 # LLM controls (Groq/OpenAI-compatible usage in ml.py)
 LLM_EXPLANATIONS_ENABLED = _env_bool("LLM_EXPLANATIONS_ENABLED", True)
 MAX_LLM_CALLS_PER_RUN = _env_int("MAX_LLM_CALLS_PER_RUN", 1000)
-MAX_TEXT_CHARS_FOR_SUMMARY = _env_int("MAX_TEXT_CHARS_FOR_SUMMARY", 10000)
+MAX_TEXT_CHARS_FOR_SUMMARY = _env_int("MAX_TEXT_CHARS_FOR_SUMMARY", 15000)
 SUMMARY_CHUNK_SIZE = _env_int("SUMMARY_CHUNK_SIZE", 5000)
-MAX_SUMMARY_CHUNKS = _env_int("MAX_SUMMARY_CHUNKS", 30)
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").strip().lower()
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+MAX_SUMMARY_CHUNKS = _env_int("MAX_SUMMARY_CHUNKS", 3)
+LLM_PROVIDER = _env_str("LLM_PROVIDER", "auto").lower()
+GROQ_MODEL = _env_str("GROQ_MODEL", "llama-3.1-8b-instant")
+GEMINI_MODEL = _env_str("GEMINI_MODEL", "gemini-2.0-flash")
 
 # Debugging
 DEBUG_PRINT_ALL_CITERS = _env_bool("DEBUG_PRINT_ALL_CITERS", False)
@@ -86,8 +101,7 @@ GLOBAL_ARXIV_MIN_INTERVAL = _env_float("GLOBAL_ARXIV_MIN_INTERVAL", 1.2)
 GLOBAL_S2_MIN_INTERVAL = _env_float("GLOBAL_S2_MIN_INTERVAL", 0.8)
 GLOBAL_OA_MIN_INTERVAL = _env_float("GLOBAL_OA_MIN_INTERVAL", 0.25)
 
-<<<<<<< HEAD
-# Provider credentials and contact metadata (env-only for local/dev/prod)
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
@@ -95,8 +109,14 @@ SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
 OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY", "")
 OPENALEX_MAILTO = os.getenv("OPENALEX_MAILTO", "")
 ARXIV_CONTACT_EMAIL = os.getenv("ARXIV_CONTACT_EMAIL", "")
-=======
+
 # Google Gemini API (free tier — used for improvement explanations in ml.py)
 # Get a free key at https://aistudio.google.com/app/apikey
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
->>>>>>> 5ed0c3f0 (cleaned code)
+GEMINI_API_KEY = _env_secret("GEMINI_API_KEY")
+OPENAI_API_KEY = _env_secret("OPENAI_API_KEY")
+GROQ_API_KEY = _env_secret("GROQ_API_KEY")
+SEMANTIC_SCHOLAR_API_KEY = _env_secret("SEMANTIC_SCHOLAR_API_KEY")
+OPENALEX_API_KEY = _env_secret("OPENALEX_API_KEY")
+OPENALEX_MAILTO = _env_str("OPENALEX_MAILTO", "")
+ARXIV_CONTACT_EMAIL = _env_str("ARXIV_CONTACT_EMAIL", "")
