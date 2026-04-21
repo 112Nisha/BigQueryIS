@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 
 rate_limiter = RateLimiter(1.2)
 _cache = Cache(ttl_days=30)
+_LLM_CALL_LOCK = threading.Lock()
+
+_CACHE_SCHEMA_VERSION = "v2"
+_SUMMARY_FALLBACK_MARKER = "Only limited source text was available, so this summary is metadata-based."
+_IMPROVEMENT_FALLBACK_MARKER = "Based on available metadata and extracted context"
 
 _similarity_model = None
 _thread_state = threading.local()
@@ -73,20 +78,27 @@ def _budget_remaining() -> int:
     st = _state()
     return max(0, MAX_LLM_CALLS_PER_RUN - st.llm_calls_used)
 
+def _is_fallback_summary(text: str) -> bool:
+    return _SUMMARY_FALLBACK_MARKER in (text or "")
+
+
+def _is_fallback_improvement(text: str) -> bool:
+    return _IMPROVEMENT_FALLBACK_MARKER in (text or "")
+
 # creates a cache key for a parent-child pair of papers
 def _pair_key(parent_id: str, child_id: str, is_reference: bool) -> str:
     rel = "ref" if is_reference else "cite"
-    return f"ml:exp:{rel}:{parent_id}:{child_id}"
+    return f"ml:{_CACHE_SCHEMA_VERSION}:exp:{rel}:{parent_id}:{child_id}"
 
 # creates a cache key for summaries of papers
 def _summary_key(paper_id: str, text: str) -> str:
     digest = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
-    return f"ml:sum:{paper_id}:{digest}"
+    return f"ml:{_CACHE_SCHEMA_VERSION}:sum:{paper_id}:{digest}"
 
 
 def _abstract_key(text: str) -> str:
     digest = hashlib.md5(text.encode("utf-8", errors="ignore")).hexdigest()
-    return f"ml:abs:{digest}"
+    return f"ml:{_CACHE_SCHEMA_VERSION}:abs:{digest}"
 
 def _model_for_provider(provider: str) -> str:
     return GROQ_MODEL if provider == "groq" else GEMINI_MODEL
@@ -242,18 +254,19 @@ def _call_llm(client, prompt, max_output_tokens=600):
         provider = st.llm_provider or "groq"
 
         try:
-            rate_limiter.wait()
-            st.llm_calls_used += 1
+            with _LLM_CALL_LOCK:
+                rate_limiter.wait()
+                st.llm_calls_used += 1
 
-            response = active_client.chat.completions.create(
-                model=_model_for_provider(provider),
-                messages=[
-                    {"role": "system", "content": "You are an expert academic reviewer."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=max_output_tokens,
-            )
+                response = active_client.chat.completions.create(
+                    model=_model_for_provider(provider),
+                    messages=[
+                        {"role": "system", "content": "You are an expert academic reviewer."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=max_output_tokens,
+                )
 
             text = (response.choices[0].message.content or "").strip()
 
@@ -437,7 +450,10 @@ def extract_abstract_with_llm(text: str, max_chunks: int = 3) -> str:
 def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: bool) -> str:
     pair_cache_key = _pair_key(parent.id, child.id, is_reference)
     cached_exp = _cache.get(pair_cache_key)
-    if cached_exp:
+    if cached_exp and (
+        not _is_fallback_improvement(cached_exp)
+        or not llm_explanations_enabled()
+    ):
         return cached_exp
 
     explanation = ""
@@ -459,7 +475,7 @@ def generate_improvement_explanation(parent: Paper, child: Paper, is_reference: 
     if not explanation:
         explanation = _fallback_improvement_explanation(parent, child, is_reference)
 
-    if explanation:
+    if explanation and not _is_fallback_improvement(explanation):
         _cache.set(pair_cache_key, explanation)
 
     return explanation
@@ -472,7 +488,10 @@ def _get_or_build_summary(client, paper: Paper, text: str) -> str:
 
     key = _summary_key(paper.id, text)
     cached = _cache.get(key)
-    if cached:
+    if cached and (
+        not _is_fallback_summary(cached)
+        or not llm_explanations_enabled()
+    ):
         paper.summary = cached
         _backfill_abstract_from_summary(paper, cached)
         return cached
@@ -482,7 +501,8 @@ def _get_or_build_summary(client, paper: Paper, text: str) -> str:
         summary = _fallback_summary_from_metadata(paper)
 
     paper.summary = summary
-    _cache.set(key, summary)
+    if not _is_fallback_summary(summary):
+        _cache.set(key, summary)
     _backfill_abstract_from_summary(paper, summary)
     return summary
 
