@@ -62,7 +62,7 @@ INPUT_PDF = _env_str("INPUT_PDF", os.path.join(PDFS_DIR, "1211.3711v1.pdf"))
 
 # Tree parameters
 MAX_DEPTH = _env_int("MAX_DEPTH", 3)
-MAX_PAPERS = _env_int("MAX_PAPERS", 20)
+MAX_PAPERS = _env_int("MAX_PAPERS", 15)
 MIN_RELEVANCE = _env_float("MIN_RELEVANCE", 0.15)
 # Root -> top_k children -> each child -> top_k children (when MAX_DEPTH=2)
 MAX_CHILDREN_PER_NODE = _env_int("MAX_CHILDREN_PER_NODE", 3)
